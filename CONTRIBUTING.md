@@ -5,8 +5,19 @@ Thanks for considering a contribution. TEMPEST is a fork of
 upstream history and BSD-3-Clause notices. This repository is currently in
 phase 1; local application work uses only the safe no-op profile.
 
-By submitting a pull request you agree that your contribution is licensed
-under the project's BSD 3-Clause License (see [LICENSE](LICENSE)).
+Contributions intended for TEMPEST are licensed under the project's BSD
+3-Clause License (see [LICENSE](LICENSE)).
+
+## TEMPEST development workflow
+
+- `master` is the only working branch. Make changes directly on `master` and
+  commit them there. Do not create feature branches or Pull Requests unless
+  the user explicitly asks for them.
+- Work only on the phase currently authorized in `docs/PROJECT_SPEC.md`.
+  A phase remains unaccepted until the user confirms its acceptance; do not
+  begin the next phase before that confirmation.
+- Run the relevant checks before committing and push verified commits to
+  `origin/master`. GitHub Actions runs on every push to `master`.
 
 ## Quick start
 
@@ -41,19 +52,18 @@ Open an issue with:
 3. What actually happened.
 4. Last ~50 lines of `docker compose -f docker-compose.dev.safe.yml logs api` if relevant.
 
-## Pull requests
+## Changes and review
 
-- Keep changes focused — one PR per concern. A PR that adds an event
-  category and *also* refactors the dashboard will get bounced.
+- Keep changes focused — one commit per concern where practical.
 - Add a test for any new backend logic that has branching behaviour
   (CRUD endpoints, scheduler decisions, parse routines). UI changes
   don't need tests unless you're adding non-trivial logic.
-- Run `pytest` and `npm run build` locally before pushing — same gates
-  as CI.
+- Run the relevant backend/frontend checks and safe Compose smoke before
+  pushing when the environment supports them; report any unavailable checks.
 - Match the existing comment style: prefer "why this is the way it is"
   over "what this line does". Rule of thumb: if a line of code can
   generate the comment, the comment isn't earning its keep.
-- Don't bump `APP_VERSION` in your PR — releases are tagged by the
+- Don't bump `APP_VERSION` in a development commit — releases are tagged by the
   maintainer.
 
 ## Code style

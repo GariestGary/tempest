@@ -1259,16 +1259,17 @@ use `docker compose -f docker-compose.dev.safe.yml down --volumes
 
 See [`docs/DEV_SAFE_MODE.md`](docs/DEV_SAFE_MODE.md) for the exact security
 boundary and [`docs/dev/LINUX_VM.md`](docs/dev/LINUX_VM.md) for the isolated
-Linux integration test profile. Docker Engine runtime has not yet been
-verified on TORNADO.
+Linux integration test profile. The safe Compose runtime job runs on a hosted
+Ubuntu runner for every push to `master`; sanitized reports are uploaded as
+workflow artifacts. Docker Engine remains unavailable for a local TORNADO run.
 
-For runtime verification in an isolated Linux VM, run
+For a manual runtime verification in an isolated Linux VM, run
 `sudo bash ./scripts/dev-safe-compose-smoke.sh`. It checks build/up,
 healthchecks, UI title, login, DB-only CRUD, denied network/lifecycle/restore
 requests, container security properties, restart, teardown, and before/after
 VM network snapshots. Docker-managed bridge/NAT/firewall deltas are expected;
-TEMPEST-owned network changes are defects. The script is prepared but has not
-run because Docker Engine is unavailable on TORNADO.
+TEMPEST-owned network changes are defects. Gate 1 remains open until the hosted
+Ubuntu job passes and its report is reviewed.
 
 ### Upstream development notes
 
@@ -1286,8 +1287,8 @@ npm run test:ci
 npm run lint
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for PR conventions and code
-style.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the `master`-only development
+workflow and code style.
 
 ## Tech stack
 
@@ -1387,8 +1388,9 @@ is inspired by the formats of those projects — no code is borrowed.
 
 ## Contributing
 
-Bug reports and PRs welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md)
-for code style, PR conventions, and what to keep out of the repo.
+Bug reports and contributions are welcome. Changes go directly to `master`;
+do not create feature branches or Pull Requests unless the user asks for them.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow and code style.
 
 ## License
 

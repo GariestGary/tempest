@@ -938,11 +938,13 @@ UI: <http://localhost:3000>. API: <http://localhost:8000>.
 Для отдельной Linux VM подготовлен воспроизводимый smoke-скрипт:
 `sudo bash ./scripts/dev-safe-compose-smoke.sh`. Он проверяет Compose build/up,
 health, login, DB-only CRUD, запрет сетевых API, свойства контейнеров,
-restart, teardown и снимает сетевое состояние VM до/после. Runtime
-проверка ожидает доступную изолированную VM и Docker Engine; на TORNADO
+restart, teardown и снимает сетевое состояние до/после. Тот же runtime smoke
+запускается на GitHub-hosted Ubuntu runner при каждом push в `master`; безопасный
+диагностический отчёт загружается как artifact. Локально на TORNADO Docker
 Engine пока недоступен. См. [инструкцию VM](docs/dev/LINUX_VM.md).
 
-См. [`CONTRIBUTING.md`](CONTRIBUTING.md) — конвенции PR и стиль кода.
+См. [`CONTRIBUTING.md`](CONTRIBUTING.md) — процесс работы только в `master`
+и стиль кода.
 
 ## Стек технологий
 
@@ -1041,8 +1043,10 @@ PiTun — это glue-код поверх зрелых проектов, без 
 
 ## Вклад в проект
 
-Bug-репорты и PR приветствуются. См. [`CONTRIBUTING.md`](CONTRIBUTING.md)
-— стиль кода, конвенции PR, что не должно попадать в репо.
+Bug-репорты и вклад в проект приветствуются. Изменения вносятся напрямую в
+`master`; feature branches и Pull Requests создаются только по отдельному
+запросу пользователя. См. [`CONTRIBUTING.md`](CONTRIBUTING.md) — процесс,
+стиль кода и правила по содержимому репозитория.
 
 ## Лицензия
 

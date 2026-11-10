@@ -11,7 +11,8 @@ docker compose -f docker-compose.dev.safe.yml config --quiet
 docker compose -f docker-compose.dev.safe.yml up --build
 ```
 
-Для полного воспроизводимого runtime smoke в изолированной Linux VM используйте
+Полный runtime smoke запускается на изолированном GitHub-hosted `ubuntu-latest`
+при каждом push в `master`. Для ручного запуска в Linux VM используйте
 [`scripts/dev-safe-compose-smoke.sh`](../scripts/dev-safe-compose-smoke.sh):
 
 ```bash
@@ -22,22 +23,33 @@ sudo bash ./scripts/dev-safe-compose-smoke.sh
 API/UI, ждёт healthchecks, проверяет UI title и login, выполняет DB-only node
 CRUD, проверяет HTTP 423 для сетевых/lifecycle/restore операций, сверяет
 `docker inspect` каждого контейнера, перезапускает сервисы и удаляет только
-созданные им контейнеры, сеть, образы и volume. По умолчанию используются
+созданные им контейнеры, сеть, образы и volume. EXIT/INT/TERM/HUP обработчики
+пытаются выполнить cleanup и сохраняют отчёт до удаления временной рабочей
+директории. По умолчанию используются
 loopback-порты API `18000` и UI `13000`; их можно задать через
 `TEMPEST_DEV_API_PORT` и `TEMPEST_DEV_UI_PORT`. Учетные данные smoke по умолчанию
 `admin` / `password`; для переопределения задайте
 `TEMPEST_SMOKE_USERNAME` / `TEMPEST_SMOKE_PASSWORD`.
 
 Перед build скрипт сохраняет адреса интерфейсов, IPv4/IPv6 routes и rules,
-nftables ruleset и SHA-256 `/etc/resolv.conf`; после `up` и teardown выводит
-diff. Docker-managed bridge, routes и NAT/firewall правила, созданные Compose,
-ожидаемы. Изменения, которые исходят непосредственно от TEMPEST, — дефект.
-Проверьте фактические diff в отчёте VM, не засчитывайте один только факт наличия
-Docker bridge как изменение приложения.
+nftables ruleset и SHA-256 `/etc/resolv.conf`; после `up` и teardown пишет
+diff в `network-diff.redacted.txt`. Docker-managed bridge, routes и NAT/firewall
+правила, созданные Compose, ожидаемы между исходным снимком и работающим
+Compose. После teardown эти изменения должны быть убраны; любую сетевую
+мутацию непосредственно TEMPEST считать дефектом. Сравнивайте оба diff и не
+считайте само наличие Docker bridge изменением приложения.
 
-Runtime проверки в этой среде пока не выполнены: на TORNADO отсутствует Docker
-Engine, Linux VM не создавалась. Поэтому наличие скрипта не закрывает smoke gate
-и задачу 1.6.
+В `diagnostics/` скрипт сохраняет ограниченный Compose status и последние 300
+строк логов сервисов; отчёт содержит только разрешённые поля `docker inspect`.
+Пароли, bearer/JWT токены и IP-адреса маскируются. Ответ login и сырые
+environment/inspect данные остаются во временной директории и удаляются после
+cleanup. В GitHub Actions отчёт прикрепляется как artifact на 14 дней даже при
+ошибке smoke. Для ручного запуска по умолчанию путь отчёта печатается в конце;
+его можно задать через `TEMPEST_SMOKE_REPORT_DIR`.
+
+На TORNADO Docker Engine недоступен, поэтому локальный runtime запуск здесь не
+выполняется. GitHub-hosted runtime job настроен, но Gate 1 и задача 1.6 остаются
+открытыми до успешного CI run и review приложенного отчёта.
 
 После запуска доступны:
 

@@ -2,7 +2,7 @@
 
 ## Статус
 
-На этапе 1 подготовлен профиль стенда, но VM не создана и не запущена: создание виртуального сетевого адаптера меняет конфигурацию TORNADO, а WSL инвентаризация в текущем Windows-сеансе завершилась `E_ACCESSDENIED`. Сетевую VM следует подготовить отдельно до сетевых интеграционных тестов; реальные nftables/WireGuard правила на этапе 1 не применять.
+Локальная VM на TORNADO не создана: это меняло бы конфигурацию хоста, а WSL инвентаризация завершилась `E_ACCESSDENIED`. Для Gate 1 safe Compose runtime smoke назначен изолированный GitHub-hosted `ubuntu-latest`; он не использует TORNADO или VORTEX. Реальные nftables/WireGuard integration rules остаются за рамками этапа 1.
 
 ## Рекомендуемая конфигурация
 
@@ -16,8 +16,9 @@
 
 ## Phase 1 Compose smoke
 
-После подготовки отдельной VM и установки Docker Engine/Compose v2 запустите
-из корня чистого clone:
+GitHub Actions выполняет этот smoke на hosted Ubuntu runner при каждом push в
+`master`. Для ручного запуска в отдельной Linux VM с Docker Engine/Compose v2
+используйте из корня clone:
 
 ```bash
 sudo bash ./scripts/dev-safe-compose-smoke.sh
@@ -26,14 +27,23 @@ sudo bash ./scripts/dev-safe-compose-smoke.sh
 Скрипт выполняет безопасный build/up, healthchecks, login, DB-only node CRUD,
 отрицательные проверки сетевых/lifecycle/restore API, runtime `docker inspect`,
 restart и teardown. Для каждого запуска он генерирует уникальные имена проекта
-и БД, поэтому teardown удаляет только ресурсы этого smoke. UI/API публикуются
-на loopback `13000`/`18000` по умолчанию. Отчёт сравнивает VM state до запуска,
-после запуска и после teardown. Docker-managed bridge/NAT/firewall delta —
-ожидаемый эффект Compose; любую сетевую мутацию непосредственно TEMPEST считать
-дефектом.
+и БД, поэтому cleanup затрагивает только ресурсы этого smoke. UI/API публикуются
+только на loopback `13000`/`18000` по умолчанию. Отчёт сравнивает сетевое
+состояние до запуска, с работающим Compose и после teardown. Docker-managed
+bridge/NAT/firewall изменения ожидаемы во время запуска; изменения от TEMPEST
+считаются дефектом. Остаточные изменения после teardown требуют разбора.
 
-VM и Docker Engine пока не подготовлены и не запускались на TORNADO; smoke
-остается невыполненным, задача 1.6 не закрыта.
+Отчёт сохраняется в `TEMPEST_SMOKE_REPORT_DIR` либо в каталоге
+`$RUNNER_TEMP/tempest-safe-compose-smoke-<run-id>` (при ручном запуске — под
+`$TMPDIR` или `/tmp`). Он содержит отредактированные Compose логи, выбранные
+поля `docker inspect` и IP-маскированный network diff, но не сохраняет login
+response, токены, сырые environment или исходные inspect JSON. GitHub Actions
+прикрепляет отчёт как artifact на 14 дней, включая неуспешные прогоны.
+EXIT/INT/TERM/HUP traps пытаются выполнить `docker compose down` перед выходом.
+
+На TORNADO runtime smoke не выполнялся из-за недоступного Docker Engine. Новый
+GitHub Actions job ещё должен пройти после push; до успешного прогона и review
+отчёта задача 1.6 и Gate 1 остаются открытыми.
 
 ## TORNADO и WSL2
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reproducible runtime/security smoke for the isolated Linux VM profile.
+# Reproducible runtime/security smoke for the safe Compose profile.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,9 +11,14 @@ export TEMPEST_DEV_API_PORT="${TEMPEST_DEV_API_PORT:-18000}"
 export TEMPEST_DEV_UI_PORT="${TEMPEST_DEV_UI_PORT:-13000}"
 API="http://127.0.0.1:$TEMPEST_DEV_API_PORT"
 UI="http://127.0.0.1:$TEMPEST_DEV_UI_PORT"
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tempest-smoke.XXXXXX")"
+REPORT_DIR="${TEMPEST_SMOKE_REPORT_DIR:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/tempest-safe-compose-smoke-$RUN_TAG}"
+REPORT_SALT="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+WORK_DIR=""
 API_TOKEN=""
 NODE_ID=""
+mkdir -p "$REPORT_DIR"
+chmod 700 "$REPORT_DIR"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tempest-smoke.XXXXXX")"
 
 compose() {
   docker compose --project-name "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" "$@"
@@ -48,29 +53,209 @@ show_network_diff() {
   done
 }
 
+sanitize_report_stream() {
+  TEMPEST_REPORT_SALT="$REPORT_SALT" python3 -c '
+import hashlib
+import ipaddress
+import os
+import re
+import sys
+
+salt = os.environ["TEMPEST_REPORT_SALT"].encode()
+text = sys.stdin.read()
+patterns = [
+    (re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[A-Za-z0-9._~+/-]+=*"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)(\"?(?:access[_-]?token|refresh[_-]?token|password|passwd|secret|api[_-]?key)\"?\s*[:=]\s*)(\"?)[^,\s;\"]+"), r"\1[REDACTED]"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), "[REDACTED_JWT]"),
+    (re.compile(r"(?i)(://[^:/\s]+:)[^@/\s]+@"), r"\1[REDACTED]@"),
+]
+for pattern, replacement in patterns:
+    text = pattern.sub(replacement, text)
+
+def hashed_ip(match):
+    value = match.group(0).strip("[](),;{}")
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return match.group(0)
+    token = hashlib.sha256(salt + value.encode()).hexdigest()[:12]
+    return match.group(0).replace(value, f"<IP:{token}>")
+
+text = re.sub(r"(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Fa-f:])", hashed_ip, text)
+text = re.sub(r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])", hashed_ip, text)
+sys.stdout.write(text)
+'
+}
+
+capture_safe_diagnostics() {
+  local diagnostics="$REPORT_DIR/diagnostics"
+  mkdir -p "$diagnostics"
+  printf '%s\n' \
+    'Only bounded service logs and allowlisted container/network metadata are included.' \
+    'Credentials and IP addresses are redacted; login responses and raw environment are excluded.' \
+    > "$diagnostics/README.txt"
+
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    compose ps --all 2>&1 | sanitize_report_stream > "$diagnostics/compose-ps.txt" || true
+    compose logs --no-color --timestamps --tail=300 2>&1 \
+      | sanitize_report_stream > "$diagnostics/compose-logs.redacted.txt" || true
+    for service in api ui; do
+      local container_id
+      container_id="$(compose ps -aq "$service" 2>/dev/null | head -n 1)"
+      [[ -n "$container_id" ]] || continue
+      if docker inspect "$container_id" > "$WORK_DIR/$service.inspect.raw.json" 2>/dev/null; then
+        python3 - "$WORK_DIR/$service.inspect.raw.json" "$diagnostics/$service-inspect-summary.json" <<'PY'
+import json
+import sys
+
+source_path, output_path = sys.argv[1:]
+with open(source_path, encoding="utf-8") as source:
+    container = json.load(source)[0]
+host = container.get("HostConfig") or {}
+state = container.get("State") or {}
+config = container.get("Config") or {}
+summary = {
+    "service": container.get("Name", "").lstrip("/"),
+    "image": container.get("Config", {}).get("Image"),
+    "state": state.get("Status"),
+    "health": (state.get("Health") or {}).get("Status"),
+    "user": config.get("User"),
+    "privileged": host.get("Privileged"),
+    "network_mode": host.get("NetworkMode"),
+    "pid_mode": host.get("PidMode"),
+    "cap_add": host.get("CapAdd"),
+    "cap_drop": host.get("CapDrop"),
+    "read_only_rootfs": host.get("ReadonlyRootfs"),
+    "security_options": host.get("SecurityOpt"),
+    "devices_present": bool(host.get("Devices")),
+    "ports": {
+        target: [
+            {"host_ip": item.get("HostIp"), "host_port": item.get("HostPort")}
+            for item in bindings or []
+        ]
+        for target, bindings in (host.get("PortBindings") or {}).items()
+    },
+    "mounts": [
+        {"type": mount.get("Type"), "target": mount.get("Destination"), "read_write": mount.get("RW")}
+        for mount in container.get("Mounts") or []
+    ],
+}
+with open(output_path, "w", encoding="utf-8") as output:
+    json.dump(summary, output, indent=2)
+    output.write("\n")
+PY
+        sanitize_report_stream < "$diagnostics/$service-inspect-summary.json" \
+          > "$diagnostics/$service-inspect-summary.redacted.json"
+        rm -f -- "$diagnostics/$service-inspect-summary.json"
+      fi
+    done
+  else
+    printf 'Docker daemon unavailable while collecting diagnostics.\n' \
+      > "$diagnostics/compose-unavailable.txt"
+  fi
+}
+
+write_network_report() {
+  if [[ ! -d "$WORK_DIR/before" ]]; then
+    printf 'Network baseline was not captured.\n' > "$REPORT_DIR/network-diff.redacted.txt"
+    return
+  fi
+
+  if [[ -d "$WORK_DIR/after-up" ]]; then
+    {
+      printf '%s\n' 'Interpretation: before -> after-up includes expected Docker-managed bridge/NAT/firewall changes.'
+      printf '%s\n' 'Interpretation: after-up -> after-teardown should remove Compose-managed state; investigate residual changes.'
+      printf '%s\n' 'Any network configuration change caused by TEMPEST itself is a defect.'
+      show_network_diff before after-up
+      if [[ -d "$WORK_DIR/after-teardown" ]]; then
+        show_network_diff after-up after-teardown
+      else
+        printf 'Post-teardown network snapshot unavailable.\n'
+      fi
+    } | sanitize_report_stream > "$REPORT_DIR/network-diff.redacted.txt"
+  elif [[ -d "$WORK_DIR/after-teardown" ]]; then
+    {
+      printf '%s\n' 'Smoke failed before Compose became healthy; this compares the baseline to the state after cleanup.'
+      show_network_diff before after-teardown
+    } | sanitize_report_stream > "$REPORT_DIR/network-diff.redacted.txt"
+  else
+    printf 'Post-run network state was not captured.\n' > "$REPORT_DIR/network-diff.redacted.txt"
+  fi
+}
+
+record_failure() {
+  local code="$1"
+  local line="$2"
+  if [[ ! -f "$REPORT_DIR/failure.txt" ]]; then
+    printf 'exit_code=%s\nline=%s\n' "$code" "$line" > "$REPORT_DIR/failure.txt"
+  fi
+}
+
 finish() {
   local result=$?
-  trap - EXIT
+  trap - EXIT ERR INT TERM HUP
   set +e
-  compose down --rmi local --volumes --remove-orphans
+  if [[ $result -ne 0 && ! -f "$REPORT_DIR/failure.txt" ]]; then
+    record_failure "$result" 0
+  fi
+
+  capture_safe_diagnostics
+  local diagnostics_result=$?
+
+  compose down --rmi local --volumes --remove-orphans \
+    > "$WORK_DIR/teardown.raw.log" 2>&1
   local teardown_result=$?
-  if [[ -d "$WORK_DIR/before" && -d "$WORK_DIR/after-up" ]]; then
-    snapshot_network after-teardown
+  if [[ -f "$WORK_DIR/teardown.raw.log" ]]; then
+    sanitize_report_stream < "$WORK_DIR/teardown.raw.log" > "$REPORT_DIR/teardown.redacted.log"
+  fi
+
+  if [[ -d "$WORK_DIR/before" ]]; then
+    snapshot_network after-teardown > "$WORK_DIR/post-teardown-snapshot.log" 2>&1
     if [[ $? -ne 0 ]]; then
       teardown_result=1
-      printf 'Could not capture network state after teardown.\n' >&2
-    else
-      show_network_diff before after-up
-      show_network_diff after-up after-teardown
+      printf 'Could not capture network state after teardown.\n' > "$REPORT_DIR/network-snapshot-error.txt"
     fi
   fi
-  rm -rf "$WORK_DIR"
-  if [[ $result -eq 0 && $teardown_result -ne 0 ]]; then
-    result=$teardown_result
+
+  write_network_report
+  if [[ $result -eq 0 && $teardown_result -ne 0 ]]; then result=$teardown_result; fi
+  if [[ $result -eq 0 && $diagnostics_result -ne 0 ]]; then result=$diagnostics_result; fi
+  if [[ $result -eq 0 && $EUID -eq 0 && -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" ]]; then
+    chown -R "$SUDO_UID:$SUDO_GID" "$REPORT_DIR" || result=$?
   fi
+  if [[ $result -ne 0 && ! -f "$REPORT_DIR/failure.txt" ]]; then
+    record_failure "$result" 0
+  fi
+  {
+    printf 'result=%s\n' "$result"
+    printf 'teardown_result=%s\n' "$teardown_result"
+    printf 'diagnostics_result=%s\n' "$diagnostics_result"
+    printf 'compose_project=%s\n' "$COMPOSE_PROJECT_NAME"
+    printf 'api_loopback_port=%s\n' "$TEMPEST_DEV_API_PORT"
+    printf 'ui_loopback_port=%s\n' "$TEMPEST_DEV_UI_PORT"
+    printf 'api_token_saved=false\n'
+    printf 'database_volume=%s\n' "$TEMPEST_DEV_DB_VOLUME"
+    printf '%s\n' 'Cleanup command: docker compose down --rmi local --volumes --remove-orphans'
+  } > "$REPORT_DIR/summary.txt"
+
+  if [[ -f "$REPORT_DIR/failure.txt" ]]; then
+    printf 'Smoke failed. Safe diagnostics were preserved at: %s\n' "$REPORT_DIR" >&2
+  else
+    printf 'Safe diagnostics were preserved at: %s\n' "$REPORT_DIR"
+  fi
+
+  if [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
+    rm -rf -- "$WORK_DIR"
+  fi
+
   exit "$result"
 }
+
+trap 'record_failure "$?" "$LINENO"' ERR
 trap finish EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 for tool in docker curl python3 ip nft diff; do
   command -v "$tool" >/dev/null || {

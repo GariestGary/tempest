@@ -1,20 +1,12 @@
 name: CI
 
-# Runs on every push to main and on every PR — fast feedback only.
+# Runs on every push to the sole development branch, master.
 # Heavier multi-arch builds live in `release.yml` and are triggered by
 # pushing a `vX.Y.Z` tag.
 
 on:
   push:
-    branches: [master, main]
-  pull_request:
-    branches: [master, main]
-
-# Cancel in-progress runs for the same ref so a quick force-push doesn't
-# burn through all your free Actions minutes.
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [master]
 
 permissions:
   contents: read
@@ -60,10 +52,8 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'frontend/package-lock.json'
 
-      # `npm ci` requires committed `package-lock.json` (re-tracked in
-      # v1.2.5 after we decided reproducible builds + supply-chain
-      # defense outweigh the Dependabot rebase friction of having both
-      # `package.json` and the lock in PRs). `--legacy-peer-deps`
+      # `npm ci` requires committed `package-lock.json`, which keeps CI
+      # reproducible. `--legacy-peer-deps`
       # tolerates dev-only peer-range mismatches (e.g. lucide-react vs
       # React 19 in older lockfiles) without weakening prod resolution.
       - name: Install dependencies (npm ci, locked)
@@ -72,8 +62,7 @@ jobs:
       - run: npm run test:ci
       - run: npm run build
 
-      # Surface the build size on PRs — handy for catching accidental
-      # 10 MB chunks before they ship.
+      # Surface the build size in every master push run.
       - name: Report dist size
         run: du -sh dist
 
@@ -126,3 +115,33 @@ jobs:
 
           assert services["api"]["environment"].get("DEV_SAFE_MODE") == "1"
           PY
+
+  safe-compose-runtime-smoke:
+    name: Safe Compose runtime smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Prepare report directory
+        run: mkdir -p "$RUNNER_TEMP/tempest-safe-compose-smoke"
+
+      - name: Install nftables for network snapshots
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends nftables
+
+      - name: Run safe Compose build and runtime smoke
+        run: |
+          sudo env \
+            TEMPEST_SMOKE_REPORT_DIR="$RUNNER_TEMP/tempest-safe-compose-smoke" \
+            bash ./scripts/dev-safe-compose-smoke.sh
+
+      - name: Upload sanitized smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tempest-safe-compose-smoke-${{ github.run_id }}
+          path: ${{ runner.temp }}/tempest-safe-compose-smoke/
+          if-no-files-found: warn
+          retention-days: 14
