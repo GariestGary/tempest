@@ -295,7 +295,7 @@ def test_invalid_plan_without_egress_never_reaches_agent_state() -> None:
 
 def test_typed_ipc_round_trip_and_audit_do_not_trust_actor_fields() -> None:
     plan = make_plan()
-    request = StageRequest(request_id=UUID(int=301), plan=plan)
+    request = StageRequest(method="stage", request_id=UUID(int=301), plan=plan)
     parsed = parse_ipc_request(request.model_dump_json())
     assert parsed == request
 
@@ -308,7 +308,7 @@ def test_typed_ipc_round_trip_and_audit_do_not_trust_actor_fields() -> None:
     assert agent.audit_log[-1]["request_id"] == str(request.request_id)
     assert agent.audit_log[-1]["peer_uid"] is None
 
-    status_request = ReadStatusRequest(request_id=UUID(int=302))
+    status_request = ReadStatusRequest(method="read_status", request_id=UUID(int=302))
     status_response = agent.handle_request(status_request.model_dump_json())
     assert status_response.ok is True
     assert status_response.request_id == status_request.request_id
@@ -318,16 +318,16 @@ def test_ipc_apply_verify_confirm_lifecycle() -> None:
     plan = make_plan()
     agent = MockNetworkAgent()
     staged = agent.handle_request(
-        StageRequest(request_id=UUID(int=401), plan=plan).model_dump_json()
+        StageRequest(method="stage", request_id=UUID(int=401), plan=plan).model_dump_json()
     )
     applied = agent.handle_request(
-        ApplyRequest(request_id=UUID(int=402), generation_id=plan.generation_id).model_dump_json()
+        ApplyRequest(method="apply", request_id=UUID(int=402), generation_id=plan.generation_id).model_dump_json()
     )
     verified = agent.handle_request(
-        VerifyRequest(request_id=UUID(int=403), generation_id=plan.generation_id).model_dump_json()
+        VerifyRequest(method="verify", request_id=UUID(int=403), generation_id=plan.generation_id).model_dump_json()
     )
     confirmed = agent.handle_request(
-        ConfirmRequest(request_id=UUID(int=404), generation_id=plan.generation_id).model_dump_json()
+        ConfirmRequest(method="confirm", request_id=UUID(int=404), generation_id=plan.generation_id).model_dump_json()
     )
 
     assert staged.ok and applied.ok and verified.ok and confirmed.ok
