@@ -24,6 +24,7 @@ CapabilityBoundingSet=
 AmbientCapabilities=
 ProtectSystem=strict
 ProtectHome=yes
+InaccessiblePaths=-/etc/NetworkManager -/etc/systemd -/etc/ssh -/var/lib/docker -/run/docker.sock -/var/run/docker.sock
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes

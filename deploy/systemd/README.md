@@ -13,7 +13,8 @@ container UID/GID mappings. Keep the optional cgroup setting unset until
 `SO_PEERCRED` PID and `/proc/<pid>/cgroup` mapping are verified on that host.
 
 The unit has no capability grants (`CapabilityBoundingSet=` and
-`AmbientCapabilities=` are empty) and allows only `AF_UNIX`. No Linux test in
+`AmbientCapabilities=` are empty), hides the common Docker socket/data paths
+and selected host service configuration paths, and allows only `AF_UNIX`. No Linux test in
 this task measured the effective capability masks of a running systemd unit;
 the unit declaration was checked in the Linux CI test. Do not add
 `CAP_NET_ADMIN` based on this template.

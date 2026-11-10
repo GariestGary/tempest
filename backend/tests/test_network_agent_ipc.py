@@ -228,11 +228,11 @@ def test_systemd_unit_declares_empty_capabilities_and_restrictive_sandbox() -> N
         "AmbientCapabilities=",
         "ProtectSystem=strict",
         "ProtectHome=yes",
+        "InaccessiblePaths=-/etc/NetworkManager -/etc/systemd -/etc/ssh -/var/lib/docker -/run/docker.sock -/var/run/docker.sock",
         "RestrictAddressFamilies=AF_UNIX",
         "ReadWritePaths=/run/tempest-agent",
     ):
         assert directive in content
-    assert "docker.sock" not in content
     assert "CAP_NET_ADMIN" not in content
 
 
