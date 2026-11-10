@@ -49,8 +49,10 @@ cleanup. В GitHub Actions отчёт прикрепляется как artifact
 
 На TORNADO Docker Engine недоступен, поэтому локальный runtime запуск здесь не
 выполняется. Hosted run #2 нашёл запись стандартного Vite config loader в
-read-only `/app/node_modules/.vite-temp`; исправление использует runner loader.
-До успешного hosted rerun и review приложенного отчёта Gate 1 и задача 1.6
+read-only `/app/node_modules/.vite-temp`; runner loader исправил старт UI. Run #3
+затем обнаружил, что `/tmp` приходит через `HostConfig.Tmpfs`, а не обычный
+список `Mounts`; проверка скорректирована и ждёт повторного hosted прогона.
+До успешного полного run и review приложенного отчёта Gate 1 и задача 1.6
 остаются открытыми.
 
 После запуска доступны:

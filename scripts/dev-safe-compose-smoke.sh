@@ -128,6 +128,7 @@ summary = {
     "read_only_rootfs": host.get("ReadonlyRootfs"),
     "security_options": host.get("SecurityOpt"),
     "devices_present": bool(host.get("Devices")),
+    "tmpfs": host.get("Tmpfs") or {},
     "ports": {
         target: [
             {"host_ip": item.get("HostIp"), "host_port": item.get("HostPort")}
@@ -342,22 +343,22 @@ user = (config.get("User") or "").split(":", 1)[0]
 assert user not in {"", "0", "root"}, (service, config.get("User"))
 
 allowed_mounts = {
-    "api": {"/app/data", "/app/app", "/app/alembic", "/app/alembic.ini", "/tmp"},
-    "ui": {"/app/src", "/tmp"},
+    "api": {"/app/data", "/app/app", "/app/alembic", "/app/alembic.ini"},
+    "ui": {"/app/src"},
 }[service]
 mounts = container.get("Mounts") or []
 destinations = {mount["Destination"] for mount in mounts}
-assert destinations <= allowed_mounts, (service, destinations)
-assert "/tmp" in destinations, (service, destinations)
+assert destinations == allowed_mounts, (service, destinations)
+tmpfs = host.get("Tmpfs") or {}
+assert set(tmpfs) == {"/tmp"}, (service, tmpfs)
+assert {"rw", "noexec", "nosuid"} <= set(tmpfs["/tmp"].split(",")), (service, tmpfs)
 if service == "api":
     assert "/app/data" in destinations, destinations
 for mount in mounts:
     destination = mount["Destination"]
     source = mount.get("Source", "")
     assert "docker.sock" not in destination and "docker.sock" not in source, mount
-    if destination == "/tmp":
-        assert mount.get("Type") == "tmpfs", mount
-    elif destination == "/app/data":
+    if destination == "/app/data":
         assert mount.get("Type") == "volume" and mount.get("RW") is True, mount
     else:
         assert mount.get("Type") == "bind" and mount.get("RW") is False, mount
