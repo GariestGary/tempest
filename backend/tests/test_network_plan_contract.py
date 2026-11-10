@@ -272,6 +272,27 @@ def test_confirm_before_successful_verify_is_rejected() -> None:
     assert agent.read_status().pending_generation_id == plan.generation_id
 
 
+def test_confirm_rechecks_snapshot_integrity_after_verify() -> None:
+    agent = MockNetworkAgent()
+    plan = make_plan()
+    agent.stage(plan)
+    agent.apply(plan.generation_id)
+    agent.verify(plan.generation_id)
+
+    # Simulate in-memory snapshot drift after Verify. Confirm must repeat the
+    # consistency check and must not promote the altered candidate to LKG.
+    next(iter(agent._active.objects.values()))["drift"] = True
+    with pytest.raises(PlanConflict, match="snapshot differs"):
+        agent.confirm(plan.generation_id)
+
+    status = agent.read_status()
+    assert status.pending_generation_id == plan.generation_id
+    assert status.active_generation == 1
+    assert status.last_known_good_generation == 0
+    with pytest.raises(PlanConflict, match="must pass Verify"):
+        agent.confirm(plan.generation_id)
+
+
 @pytest.mark.parametrize("verification", ["stale", "failed"])
 def test_failed_or_stale_verification_never_authorizes_confirm(verification: str) -> None:
     agent = MockNetworkAgent()

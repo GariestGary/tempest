@@ -1,6 +1,6 @@
 # TEMPEST — спецификация продукта и поэтапный план разработки
 
-> **Статус:** этап 1 принят владельцем по Gate 1; этап 2 в работе, разрешена только задача 2.1. Актуальная сводка — §15.
+> **Статус:** этапы 0/1 приняты; этап 2 `IN_PROGRESS`, задача 2.1 принята владельцем, текущая авторизация — только задача 2.2. Актуальная сводка — §15.
 > **Дата исходного решения:** 2026-11-10.  
 > **Название продукта:** **TEMPEST** (без «2», «3», «Next» и других версий в имени).  
 > **База:** форк [DaveBugg/PiTun](https://github.com/DaveBugg/PiTun), ветка upstream `master`.  
@@ -18,7 +18,7 @@
 
 **При первичной работе с ещё не базированным проектом:** разрешён **только этап 0**. Сначала изучить исходный код PiTun и зафиксировать baseline. TEMPEST уже прошёл и принял этапы 0 и 1; действующую авторизацию брать из §15. Не переписывать backend, не менять firewall хоста и не разворачивать сервисы на VORTEX без отдельного разрешённого этапа.
 
-Этапы 0 и 1 приняты владельцем. Этап 1 принят по успешному [GitHub Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`. Текущая авторизация распространяется только на задачу 2.1; задачи 2.2–2.8 и все последующие этапы требуют отдельного подтверждения.
+Этапы 0 и 1 приняты владельцем. Этап 1 принят по успешному [GitHub Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`. Задача 2.1 принята владельцем после ревью `be061d953c52e25da8338d545d117fdbb1d9da24` и успешного CI run #10. Текущая авторизация распространяется только на задачу 2.2; задачи 2.3–2.8 и все последующие этапы требуют отдельного подтверждения.
 
 Для каждой задачи:
 
@@ -495,8 +495,8 @@ class IngressAdapter(Protocol):
 ## 15. Пошаговый план реализации и отслеживание прогресса
 
 **Текущий этап: `2 — Безопасная граница привилегий и NetworkPlan`.**
-**Общий статус: `IN_PROGRESS` (этап 1 принят владельцем; задача 2.1 передаётся на review отдельно).**
-**Правило:** выполняется только задача 2.1. Задачи 2.2–2.8 и этап 3 заблокированы до отдельного подтверждения. Gate 2 и этап 2 не приняты.
+**Общий статус: `IN_PROGRESS` (этап 1 принят; задача 2.1 принята владельцем; задача 2.2 выполняется).**
+**Правило:** выполняется только задача 2.2. Задачи 2.3–2.8 и этап 3 заблокированы до отдельного подтверждения. Gate 2 и этап 2 не приняты.
 
 ### Сводка фаз
 
@@ -504,7 +504,7 @@ class IngressAdapter(Protocol):
 |---:|---|---|---|
 | 0 | Форк, аудит и исходный baseline | **ACCEPTED** | [Baseline и проверки](UPSTREAM_BASELINE.md), [риски](HOST_PRIVILEGE_AUDIT.md), [gap matrix](TEMPEST_GAP_MATRIX.md), [ADR-001](adr/ADR-001-privilege-separation.md) |
 | 1 | Воспроизводимая dev/test-среда и safe mode | **ACCEPTED** | Владелец принял по [Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356` |
-| 2 | Privilege separation и безопасный NetworkPlan | **IN_PROGRESS** | Разрешена только задача 2.1; Gate 2 не принят |
+| 2 | Privilege separation и безопасный NetworkPlan | **IN_PROGRESS** | 2.1 `ACCEPTED`, 2.2 `IN_PROGRESS`; Gate 2 не принят |
 | 3 | Сущности Provider/Endpoint/Group и архитектура adapters | BLOCKED | Динамическая модель и совместимость с PiTun узлами |
 | 4 | Egress WG/AWG/VLESS (и DIRECT) | BLOCKED | Рабочие исходящие методы проверены end-to-end |
 | 5 | Policy Engine, DNS и fail-closed routing | BLOCKED | Ручное правило управляет тестовым потоком без утечек |
@@ -548,12 +548,12 @@ class IngressAdapter(Protocol):
 
 **Gate 1: ACCEPTED владельцем.** Dev-safe UI/API, backend без host privileges, runtime security, deny boundary, CRUD/restart/teardown и network before/up/teardown diff прошли hosted run #5. Подробный reviewed network diff и sanitised diagnostics доступны в [run #4 artifact](https://github.com/GariestGary/tempest/actions/runs/42781710707/artifacts/13746286950); [run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332) успешно завершил все jobs на commit `38fec1220c250b3b398e9160842e301d92d9d356`, что владелец принял. Дифф отделяет Docker-managed bridge/NAT от сетевых изменений TEMPEST; прямых TEMPEST network mutations не выявлено. Docker Engine на TORNADO остаётся недоступен; он не требовался для принятой hosted проверки.
 
-### ЭТАП 2 — Безопасная граница привилегий и операции с сетью (`IN_PROGRESS`; разрешена только задача 2.1)
+### ЭТАП 2 — Безопасная граница привилегий и операции с сетью (`IN_PROGRESS`; разрешена только задача 2.2)
 
 **Цель:** отказаться от широкого доступа PiTun Control Plane к хосту, сохранив возможность **управлять своими** маршрутами.
 
-- [x] 2.1. Спроектировать и первоначально проверить versioned `NetworkPlan`, типизированные операции, serialization/validators, privilege-free mock `NetworkAgent` и typed local Unix IPC contract; описать peer authentication/audit и Linux-only A/B experiment. Contract tests прошли hosted run #7; задача `READY_FOR_REVIEW`, owner acceptance не зафиксирована. Production Unix socket, реальные namespace/auth tests и kernel networking apply остаются вне этого initial slice.
-- [ ] 2.2. Выделить host-agent как отдельный systemd service; задать Linux sandboxing/capabilities на основе реально используемых операций, а не наугад.
+- [x] 2.1. Спроектировать и первоначально проверить versioned `NetworkPlan`, типизированные операции, serialization/validators, privilege-free mock `NetworkAgent` и typed local Unix IPC contract; описать peer authentication/audit и Linux-only A/B experiment. Принята владельцем после review `be061d9` и успешного CI run #10.
+- [ ] 2.2. Выделить Linux Agent как самостоятельный systemd service и AF_UNIX IPC с `SO_PEERCRED`, ограниченным framing/replay и typed contract; оставить сетевые операции no-op/mock. Подготовить unit с отдельной identity, пустым набором capabilities и строгим sandbox. До Linux VM runtime проверки effective capabilities, cgroup mapping и namespace-scoped service поведения остаются непроверенными.
 - [ ] 2.3. Перенести все необходимые network mutations из API и PiTun manager'ов в agent; нерелевантные router/WiFi/DHCP/SSH-deploy фичи отключить за feature flags.
 - [ ] 2.4. Удалить у API доступ к host docker.sock, `privileged`, `pid: host`, host network, host sysctl и общесистемным конфигам. Для firewall агента не давать shell endpoint.
 - [ ] 2.5. Ввести реестр собственных nftables/ip rule/fwmark/TUN объектов; ни один foreign объект не удаляется.

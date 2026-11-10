@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -54,6 +56,7 @@ class _Snapshot:
     generation: int
     generation_id: UUID | None
     fingerprint: str | None
+    objects_fingerprint: str
     objects: dict[str, dict[str, object]]
 
 
@@ -76,7 +79,14 @@ class MockNetworkAgent:
         self._clock = clock
         self._lock = threading.RLock()
         self._foreign_objects = dict(foreign_objects or {})
-        empty = _Snapshot(generation=0, generation_id=None, fingerprint=None, objects={})
+        empty_objects: dict[str, dict[str, object]] = {}
+        empty = _Snapshot(
+            generation=0,
+            generation_id=None,
+            fingerprint=None,
+            objects_fingerprint=_objects_fingerprint(empty_objects),
+            objects=empty_objects,
+        )
         self._active = empty
         self._last_known_good = empty
         self._pending: _Pending | None = None
@@ -178,6 +188,7 @@ class MockNetworkAgent:
                 generation=plan.generation,
                 generation_id=plan.generation_id,
                 fingerprint=fingerprint,
+                objects_fingerprint=_objects_fingerprint(plan.owned_objects()),
                 objects=plan.owned_objects(),
             )
             deadline = int((self._clock() + plan.confirmation_timeout_seconds) * 1000)
@@ -199,6 +210,12 @@ class MockNetworkAgent:
                 raise PlanConflict("confirmation generation does not match pending apply")
             if not self._pending.verified:
                 raise PlanConflict("generation must pass Verify before Confirm")
+            # Verify permission is only a point-in-time observation. Re-check
+            # the immutable candidate at the commit boundary as well, so a
+            # stale approval can never promote a changed active snapshot.
+            if not self._snapshot_is_intact(self._active, self._pending.snapshot):
+                self._pending = replace(self._pending, verified=False)
+                raise PlanConflict("active snapshot differs from pending generation")
             self._last_known_good = self._pending.snapshot
             self._active = self._pending.snapshot
             self._pending = None
@@ -212,7 +229,7 @@ class MockNetworkAgent:
             self._expire_pending()
             if self._pending is None or self._pending.snapshot.generation_id != generation_id:
                 raise GenerationNotFound("generation is not awaiting verification")
-            if self._active != self._pending.snapshot:
+            if not self._snapshot_is_intact(self._active, self._pending.snapshot):
                 # A failed re-verification revokes this generation's prior approval.
                 if self._pending.verified:
                     self._pending = replace(self._pending, verified=False)
@@ -326,6 +343,16 @@ class MockNetworkAgent:
                 owner = self._foreign_objects[object_id]
                 raise OwnershipConflict(f"object ID conflicts with foreign owner {owner!r}")
 
+    @staticmethod
+    def _snapshot_is_intact(active: _Snapshot, pending: _Snapshot) -> bool:
+        return (
+            active.generation == pending.generation
+            and active.generation_id == pending.generation_id
+            and active.fingerprint == pending.fingerprint
+            and active.objects_fingerprint == pending.objects_fingerprint
+            and _objects_fingerprint(active.objects) == pending.objects_fingerprint
+        )
+
     def _expire_pending(self) -> None:
         if self._pending is None:
             return
@@ -354,3 +381,8 @@ class MockNetworkAgent:
                 "peer_pid": None,
             }
         )
+
+
+def _objects_fingerprint(objects: dict[str, dict[str, object]]) -> str:
+    payload = json.dumps(objects, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

@@ -12,7 +12,7 @@
 
 ## 2026-11-10 · этап 1
 
-**ACCEPTED владельцем** по успешному [GitHub Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`. Run #5 завершил все jobs успешно, включая backend/frontend/static Compose и hosted Linux runtime smoke Gate 1. Этап 2 разблокирован и имеет статус `IN_PROGRESS`; в текущей итерации разрешена только задача 2.1.
+**ACCEPTED владельцем** по успешному [GitHub Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`. Run #5 завершил все jobs успешно, включая backend/frontend/static Compose и hosted Linux runtime smoke Gate 1. Этап 2 имеет статус `IN_PROGRESS`; задача 2.1 принята владельцем, выполняется только задача 2.2.
 
 - Добавлен отдельный `docker-compose.dev.safe.yml`: непривилегированные UID, read-only root filesystems, `cap_drop: ALL`, loopback-only port mappings, отдельный DB volume; без host network/PID, Docker socket и системных host mounts. `docker compose config` и статический аудит параметров прошли.
 - `DEV_SAFE_MODE=1` останавливает штатный lifecycle после локальной SQLite и defaults. Ревью проверило все зарегистрированные HTTP routes/WebSocket deny boundary, lifecycle startup hooks/background tasks, dataplane guards и закрытые backup restore/network/system operations. Исправленные regression tests прошли: backend run #4 дал 1736 passed, 2 skipped.
@@ -26,14 +26,20 @@
 - Git workflow: только `master`, direct commits, без feature branches/PR без отдельного запроса; GitHub Actions запускается на каждый `push` в `master`. Неудачные runs #2/#3 приложили отчёты, и cleanup выполнялся при обеих ошибках.
 - Проверки: Bash `-n`, workflow YAML/master-trigger assertions, sanitizer checks (пароли, bearer/JWT, URL credentials и IP), mocked cleanup-on-error, `docker compose config --quiet`, `git diff --check`; frontend 142 теста, lint/build; backend 1736 passed/2 skipped; hosted Compose runtime smoke — pass.
 
-## 2026-11-10 · этап 2, задача 2.1
+## 2026-11-10 · этап 2, задача 2.1 — ACCEPTED
 
-**Этап 2 `IN_PROGRESS`; задача 2.1 `READY_FOR_REVIEW`.** Этап 1 принят владельцем по run #5. Добавлены versioned typed `NetworkPlan`, строгий JSON IPC контракт и privilege-free mock Agent. Hosted [Actions run #7](https://github.com/GariestGary/tempest/actions/runs/42806285061) на commit `fac3f083a479af7bc60bb193feb2b44bed622ba9` завершился успешно: backend 1757 passed / 2 skipped, frontend 142 passed + lint/build, safe Compose audit/runtime smoke и CodeQL прошли. Sanitized runtime artifact: [run #7](https://github.com/GariestGary/tempest/actions/runs/42806285061/artifacts/13757503990). Run #6 сначала выявил две ошибки fixture (не были заданы обязательные IPC `method`); исправление вошло в `fac3f08`, полный повтор run #7 зелёный.
+**Этап 2 `IN_PROGRESS`; задача 2.1 `ACCEPTED` владельцем** после ревью `be061d953c52e25da8338d545d117fdbb1d9da24` и успешного CI run #10. Добавлены versioned typed `NetworkPlan`, строгий JSON IPC контракт и privilege-free mock Agent. Предыдущая hosted проверка: [Actions run #9](https://github.com/GariestGary/tempest/actions/runs/42814005624) (backend 1764 passed / 2 skipped, frontend 142 passed + lint/build, safe Compose smoke); [CodeQL run #9](https://github.com/GariestGary/tempest/actions/runs/42814005724). Задача 2.2 — единственная текущая авторизация.
 
-Review задачи 2.1 ожидает владельца; задачи 2.2–2.8 и Gate 2 не приняты и не разрешены. Реальный Unix socket/peer authentication, durable journal, Linux namespace A/B experiment и nftables/WireGuard apply не выполнялись; ADR-001 остаётся `PROPOSED`. Python на TORNADO не запустился из-за недоступного Windows Store runtime; backend проверен hosted runner. Сетевые настройки TORNADO/VORTEX не менялись.
+Задача 2.1 принята; Gate 2 остаётся непринятым. AF_UNIX server/peer authentication, durable journal, Linux namespace A/B experiment и nftables/WireGuard apply не входили в 2.1. ADR-001 остаётся `PROPOSED`. Python на TORNADO не запускается из-за недоступного Windows Store runtime; backend проверен hosted runner. Сетевые настройки TORNADO/VORTEX не менялись.
 
 - Базовый кандидат — dataplane/Agent в заранее подготовленном отдельном Linux network namespace; `CAP_NET_ADMIN` проверяется только внутри этого namespace. Host-netns systemd Agent — резервный вариант, если эксперимент докажет конкретную host-only операцию. Control Plane (FastAPI/React/SQLite) остаётся непривилегированным и без сетевых системных вызовов.
 - Технический контракт и A/B рецепт Linux-only эксперимента: [NetworkPlan / IPC и эксперимент](NETWORK_PLAN_IPC.md). Mock исполняет только in-memory state machine; сетевые syscalls отсутствуют.
 - Run #5 и commit приёмки этапа 1: [Actions](https://github.com/GariestGary/tempest/actions/runs/42783278332), `38fec1220c250b3b398e9160842e301d92d9d356`.
 
 ADR-001 и выбор netns остаются открытыми; реальные nftables/WG правила не запускались.
+
+## 2026-11-10 · этап 2, задача 2.2 — IN_PROGRESS
+
+Добавлены самостоятельный `python -m app.network_agent` AF_UNIX listener и systemd unit. Транспорт использует frame limit/timeouts, `SO_PEERCRED` UID/GID allowlist, optional cgroup match, последовательное обслуживание клиентов и bounded process-local replay guard. Действия логируются с kernel peer IDs без тел запросов. Состояние остаётся in-memory mock; все сетевые операции — no-op. `Confirm` повторно проверяет целостность pending snapshot.
+
+Перед hosted Linux проверки локальный Python недоступен на TORNADO из-за отказа Microsoft Store runtime. Итоговый READY_FOR_REVIEW, CI/CodeQL результаты и SHA будут внесены после проверок. Effective capabilities запущенного systemd service, cgroup/user-namespace mapping и namespace behavior пока не проверялись; задач 2.3–2.8 работа не касается, ADR-001 остаётся `PROPOSED`.

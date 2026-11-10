@@ -5,7 +5,7 @@
 ## Current instructions
 
 - Product name: **TEMPEST** (no version suffix). Fork base: `DaveBugg/PiTun` (`master`, BSD-3-Clause).
-- **Phase 1: `ACCEPTED` by the owner on 2026-11-10**, based on successful GitHub Actions [run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332) at commit `38fec1220c250b3b398e9160842e301d92d9d356`. **Current phase: PHASE 2 (`IN_PROGRESS`); task 2.1 is `READY_FOR_REVIEW`.** Do not start tasks 2.2–2.8 or phase 3 without separate confirmation; do not mark phase 2 accepted before its Gate 2 and owner review.
+- **Phase 1: `ACCEPTED` by the owner on 2026-11-10**, based on successful GitHub Actions [run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332) at commit `38fec1220c250b3b398e9160842e301d92d9d356`. **Current phase: PHASE 2 (`IN_PROGRESS`); task 2.1 is `ACCEPTED`; task 2.2 is `IN_PROGRESS`.** Do not start tasks 2.3–2.8 or phase 3 without separate confirmation; do not mark phase 2 accepted before its Gate 2 and owner review.
 - **Git workflow:** `master` is the only working branch. Make changes directly on `master`; do not create feature branches or Pull Requests unless the user asks for them separately.
 - Reuse PiTun architecture/tests and preserve upstream history/license. Do not rewrite the backend in .NET.
 - **No automatic geo-content unblocking detection.** Geo-specific routing is user-managed via explicit rules. AUTO is limited to transport-level health/failover within approved candidates.
@@ -26,4 +26,4 @@
 
 ## Accepted phase 0/1 baselines
 
-The baseline SHA, host-operation audit, feature gap matrix, and proposed ADR-001 are recorded in `docs/`. Phase 0 and phase 1 are accepted. Gate 1 evidence is recorded in `docs/STATUS.md` and the Actions run above. Task 2.1's typed contract/mock is ready for owner review; current authorization remains limited to that task. Do **not** implement real nftables/WireGuard apply, start tasks 2.2–2.8, deploy on VORTEX, or move beyond task 2.1 without separate user confirmation. ADR-001 remains `PROPOSED` until the Linux architecture experiments are reviewed.
+The baseline SHA, host-operation audit, feature gap matrix, and proposed ADR-001 are recorded in `docs/`. Phase 0 and phase 1 are accepted. Gate 1 evidence is recorded in `docs/STATUS.md` and the Actions run above. Task 2.1 was accepted by the owner on 2026-11-10 after review of `be061d953c52e25da8338d545d117fdbb1d9da24` and successful CI run #10. Current authorization is limited to task 2.2. Do **not** start tasks 2.3–2.8, implement nftables/WireGuard apply, deploy on VORTEX, or move beyond task 2.2 without separate user confirmation. ADR-001 remains `PROPOSED` until Linux architecture experiments are reviewed.
