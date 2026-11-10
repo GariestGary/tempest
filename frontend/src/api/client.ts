@@ -10,6 +10,7 @@ import type {
   UserAgentTemplate, UserAgentTemplateCreate, UserAgentTemplateUpdate,
   UserAgentTemplateImportResult,
   SystemStatus, SystemSettings, SystemVersions, ProxyMode,
+  DevSafeModeStatus,
   GeoDataStatus, GeoUpdateProgress,
   DecoyTemplate,
   DnsRule, DnsRuleCreate, DnsRuleUpdate, DnsSettings, DnsTestResult,
@@ -219,7 +220,7 @@ export const nodesApi = {
     const a = document.createElement('a')
     a.href = url
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-    a.download = `pitun-nodes-${stamp}.txt`
+    a.download = `tempest-nodes-${stamp}.txt`
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -234,7 +235,7 @@ export const nodesApi = {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = (r.data?.exported_at?.replace(/[:.]/g, '-') ?? 'pitun-nodes') + '.json'
+    a.download = (r.data?.exported_at?.replace(/[:.]/g, '-') ?? 'tempest-nodes') + '.json'
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -381,7 +382,7 @@ export const uaTemplatesApi = {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'pitun-ua-templates.json'
+    a.download = 'tempest-ua-templates.json'
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -403,6 +404,9 @@ export const uaTemplatesApi = {
 // ── System ────────────────────────────────────────────────────────────────────
 
 export const systemApi = {
+  devSafeMode: () =>
+    http.get<DevSafeModeStatus>('/dev/safe-mode').then(r => r.data),
+
   status: () =>
     http.get<SystemStatus>('/system/status').then(r => r.data),
 
@@ -1048,7 +1052,7 @@ export const serversApi = {
     a.href = url
     const ts = (r.data?.exported_at ?? '').replace(/[:.]/g, '-')
     const tag = includeSecrets ? 'with-secrets' : 'no-secrets'
-    a.download = `pitun-servers-${ts}-${tag}.json`
+    a.download = `tempest-servers-${ts}-${tag}.json`
     document.body.appendChild(a)
     a.click()
     a.remove()

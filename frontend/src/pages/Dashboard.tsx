@@ -585,8 +585,8 @@ export function Dashboard() {
                   disabled={updateSettings.isPending || isModeUnsupported}
                   title={isModeUnsupported
                     ? t(
-                        'TUN inbound requires sing-box core. The vanilla XTLS/Xray-core shipped with PiTun does not implement it. Selecting this mode would silently break TPROXY until reverted. Stay on TPROXY for now.',
-                        'TUN inbound требует sing-box core. Ванильный XTLS/Xray-core в составе PiTun его не поддерживает. Выбор этого режима тихо сломает TPROXY до возврата. Оставайтесь на TPROXY.',
+                        'TUN inbound requires sing-box core. The vanilla XTLS/Xray-core shipped with TEMPEST does not implement it. Selecting this mode would silently break TPROXY until reverted. Stay on TPROXY for now.',
+                        'TUN inbound требует sing-box core. Ванильный XTLS/Xray-core в составе TEMPEST его не поддерживает. Выбор этого режима тихо сломает TPROXY до возврата. Оставайтесь на TPROXY.',
                       )
                     : undefined}
                   className={clsx(

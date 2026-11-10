@@ -67,8 +67,8 @@ export default function XuiPage() {
         </h1>
         <p className="text-sm text-gray-500 hidden md:block">
           {t(
-            'Manage VLESS / Trojan / SOCKS inbounds on x-ui-pro / 3x-ui panels deployed via PiTun',
-            'Управляйте VLESS / Trojan / SOCKS инбаундами на панелях x-ui-pro / 3x-ui, развёрнутых через PiTun',
+            'Manage VLESS / Trojan / SOCKS inbounds on x-ui-pro / 3x-ui panels deployed via TEMPEST',
+            'Управляйте VLESS / Trojan / SOCKS инбаундами на панелях x-ui-pro / 3x-ui, развёрнутых через TEMPEST',
           )}
         </p>
         <span className="flex-1" />
@@ -237,7 +237,7 @@ function CopyUriButton({ serverId }: { serverId: number }) {
       type="button"
       onClick={run}
       disabled={state === 'busy'}
-      title={t('Copy the xui:// address to import this panel on another PiTun box. It contains the API token and the panel login.', 'Скопировать адрес xui:// для импорта этой панели на другой коробке PiTun. В нём токен API и логин панели.')}
+      title={t('Copy the xui:// address to import this panel on another TEMPEST box. It contains the API token and the panel login.', 'Скопировать адрес xui:// для импорта этой панели на другой коробке TEMPEST. В нём токен API и логин панели.')}
       className="inline-flex items-center gap-1 text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 disabled:opacity-50"
     >
       {state === 'done' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -464,15 +464,15 @@ function ServerDetail({ server }: { server: XuiServer }) {
           {/* Sync = server-side reconcile of XuiClient cache ↔ panel.
               Distinct from Refresh (which just re-fetches the list
               the UI renders). Use after you've added/removed clients
-              directly in the panel UI to keep PiTun's view honest. */}
+              directly in the panel UI to keep TEMPEST's view honest. */}
           <button
             type="button"
             onClick={() => syncMut.mutate()}
             disabled={syncMut.isPending}
             className="rounded-lg border border-gray-700 hover:bg-gray-800 px-2.5 py-1.5 text-xs text-gray-300 inline-flex items-center gap-1.5 disabled:opacity-50"
             title={t(
-              'Reconcile the PiTun client cache with what is actually on the panel right now',
-              'Сверить локальный кеш PiTun с текущим состоянием панели',
+              'Reconcile the TEMPEST client cache with what is actually on the panel right now',
+              'Сверить локальный кеш TEMPEST с текущим состоянием панели',
             )}
           >
             {syncMut.isPending
@@ -1518,8 +1518,8 @@ function AddClientModal({
               />
               <p className="text-[11px] text-gray-500 mt-1 leading-snug">
                 {t(
-                  'Stored in the panel\'s "email" field. The `pi-` prefix lets PiTun identify managed clients on /sync.',
-                  'Сохраняется в поле "email" панели. Префикс `pi-` помогает PiTun отличать свои клиенты при синхронизации.',
+                  'Stored in the panel\'s "email" field. The `pi-` prefix lets TEMPEST identify managed clients on /sync.',
+                  'Сохраняется в поле "email" панели. Префикс `pi-` помогает TEMPEST отличать свои клиенты при синхронизации.',
                 )}
               </p>
             </div>

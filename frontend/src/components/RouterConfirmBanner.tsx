@@ -60,8 +60,8 @@ export default function RouterConfirmBanner() {
             {t('Router mode is on trial.', 'Режим роутера на испытании.')}
           </span>{' '}
           {t(
-            'If your network still works, confirm it. Otherwise PiTun switches back to gateway mode by itself — nothing you configured is lost.',
-            'Если сеть работает — подтвердите. Иначе PiTun сам вернётся в режим шлюза, ничего из настроенного не потеряется.',
+            'If your network still works, confirm it. Otherwise TEMPEST switches back to gateway mode by itself — nothing you configured is lost.',
+            'Если сеть работает — подтвердите. Иначе TEMPEST сам вернётся в режим шлюза, ничего из настроенного не потеряется.',
           )}
         </div>
         <span className="font-mono text-[13px] tabular-nums text-amber-900 dark:text-amber-200">

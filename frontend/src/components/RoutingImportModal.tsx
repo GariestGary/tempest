@@ -89,7 +89,7 @@ function parseFile(text: string, t: (en: string, ru: string) => string): Parsed 
 
   if (json && typeof json === 'object' && !Array.isArray(json) && json.format === 'pitun-routing') {
     const rules = flattenNative(json).filter(r => RULE_TYPES.has(r.rule_type) && r.match_value && r.action)
-    return { rules, note: t('PiTun native format', 'Нативный формат PiTun') }
+    return { rules, note: t('Legacy PiTun-compatible format', 'Совместимый со старым PiTun формат') }
   }
   if (Array.isArray(json)) {
     // Raw RoutingPortRule[] (native rule array) vs V2Ray entries.

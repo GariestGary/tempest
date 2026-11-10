@@ -149,8 +149,8 @@ export default function RouterPage() {
             </p>
             <p className="text-gray-500 leading-relaxed">
               {t(
-                'Your ISP router keeps handing out addresses and doing NAT. PiTun sits on the same network and only proxies the devices you point at it. Nothing below the mode selector applies.',
-                'Ваш роутер продолжает раздавать адреса и делать NAT. PiTun стоит в той же сети и проксирует только те устройства, которые вы на него направите. Всё ниже переключателя режима не применяется.',
+                'Your ISP router keeps handing out addresses and doing NAT. TEMPEST sits on the same network and only proxies the devices you point at it. Nothing below the mode selector applies.',
+                'Ваш роутер продолжает раздавать адреса и делать NAT. TEMPEST стоит в той же сети и проксирует только те устройства, которые вы на него направите. Всё ниже переключателя режима не применяется.',
               )}
             </p>
             <p className="text-[11px] text-gray-600 mt-1.5">
@@ -166,8 +166,8 @@ export default function RouterPage() {
             </p>
             <p className="text-gray-500 leading-relaxed">
               {t(
-                'PiTun takes the uplink itself — DHCP, static, PPPoE or a tagged VLAN — hands out addresses on the LAN, does NAT, and can serve the WiFi. It needs two or more physical ports.',
-                'PiTun сам берёт аплинк — DHCP, статика, PPPoE или VLAN с меткой, — раздаёт адреса в LAN, делает NAT и может раздавать Wi-Fi. Нужно два и более физических порта.',
+                'TEMPEST takes the uplink itself — DHCP, static, PPPoE or a tagged VLAN — hands out addresses on the LAN, does NAT, and can serve the WiFi. It needs two or more physical ports.',
+                'TEMPEST сам берёт аплинк — DHCP, статика, PPPoE или VLAN с меткой, — раздаёт адреса в LAN, делает NAT и может раздавать Wi-Fi. Нужно два и более физических порта.',
               )}
             </p>
             <p className="text-[11px] text-gray-600 mt-1.5">
@@ -270,8 +270,8 @@ export default function RouterPage() {
                 </div>
                 <div className="text-[11px] text-gray-500 mt-0.5">
                   {t(
-                    "Useful when PiTun sits behind another router: that uplink is your own network, and it's where you already are. Refused outright if the uplink turns out to hold a public address — that would put the login page in front of the internet.",
-                    'Полезно, когда PiTun стоит за другим роутером: этот аплинк — ваша же сеть, и вы уже находитесь в ней. Если у аплинка окажется публичный адрес, включение будет отклонено — это выставило бы страницу входа в интернет.',
+                    "Useful when TEMPEST sits behind another router: that uplink is your own network, and it's where you already are. Refused outright if the uplink turns out to hold a public address — that would put the login page in front of the internet.",
+                    'Полезно, когда TEMPEST стоит за другим роутером: этот аплинк — ваша же сеть, и вы уже находитесь в ней. Если у аплинка окажется публичный адрес, включение будет отклонено — это выставило бы страницу входа в интернет.',
                   )}
                 </div>
               </div>

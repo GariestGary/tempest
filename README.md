@@ -1,13 +1,17 @@
-# PiTun
+# TEMPEST
 
 **🌐 Languages:** **English** · [Русский](README.ru.md)
 
-> Self-hosted router and transparent proxy manager for Raspberry Pi 4/5
-> (and any other Linux box). Sit it **beside** your router, or let it
-> **be** the router — taking the ISP uplink, handing out addresses,
-> doing NAT and serving the WiFi. Either way it intercepts LAN traffic
-> via nftables TPROXY and routes it through xray-core by your rules —
-> domain, GeoIP, GeoSite, MAC, port, protocol — from a web UI.
+> TEMPEST is a self-hosted VPN gateway and egress orchestrator for Linux,
+> forked from [DaveBugg/PiTun](https://github.com/DaveBugg/PiTun). This
+> repository is in phase 1: only the non-networking safe development
+> profile is authorized; VPN traffic and host network operations are not
+> available in that profile.
+
+> **Upstream reference:** feature, installation, and router-mode sections
+> below retain PiTun documentation for comparison. They describe upstream
+> behavior and are not TEMPEST deployment instructions. Use the safe
+> development profile in [`docs/DEV_SAFE_MODE.md`](docs/DEV_SAFE_MODE.md).
 
 [![CI](https://img.shields.io/github/actions/workflow/status/DaveBugg/PiTun/ci.yml?branch=master&label=CI)](#)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
@@ -1235,27 +1239,52 @@ when remote.
 
 ## Development
 
-```bash
-# Backend
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-python -m uvicorn app.main:app --reload --port 8000
-python -m pytest tests/ -q
+### TEMPEST safe local profile
 
+Use the dedicated no-op profile for local UI/API work. It binds only to
+loopback and does not start Xray, DNS, nftables, routes, TUN, router mode,
+or Docker sidecars. The UI labels the dataplane as disabled; this profile
+does not provide VPN traffic.
+
+```powershell
+docker compose -f docker-compose.dev.safe.yml config --quiet
+docker compose -f docker-compose.dev.safe.yml up --build
+```
+
+UI: <http://localhost:3000>. API: <http://localhost:8000>. Stop with
+`Ctrl+C`, or use `docker compose -f docker-compose.dev.safe.yml down
+--remove-orphans` from another terminal. To reset only the dev database,
+use `docker compose -f docker-compose.dev.safe.yml down --volumes
+--remove-orphans`.
+
+See [`docs/DEV_SAFE_MODE.md`](docs/DEV_SAFE_MODE.md) for the exact security
+boundary and [`docs/dev/LINUX_VM.md`](docs/dev/LINUX_VM.md) for the isolated
+Linux integration test profile. Docker Engine runtime has not yet been
+verified on TORNADO.
+
+For runtime verification in an isolated Linux VM, run
+`sudo bash ./scripts/dev-safe-compose-smoke.sh`. It checks build/up,
+healthchecks, UI title, login, DB-only CRUD, denied network/lifecycle/restore
+requests, container security properties, restart, teardown, and before/after
+VM network snapshots. Docker-managed bridge/NAT/firewall deltas are expected;
+TEMPEST-owned network changes are defects. The script is prepared but has not
+run because Docker Engine is unavailable on TORNADO.
+
+### Upstream development notes
+
+The commands below describe upstream PiTun development only. Starting
+FastAPI outside `DEV_SAFE_MODE=1` runs the production lifecycle, which may
+apply system toggles, reconcile router mode, start Xray and manage Docker
+sidecars. Do not use these commands for TEMPEST local work.
+
+```bash
 # Frontend
 cd frontend
 npm ci
-npm run dev          # http://localhost:5173
 npm run build        # tsc + vite (catches type errors)
 npm run test:ci
 npm run lint
 ```
-
-The full Docker stack lives in `docker-compose.yml`. For local UI work
-without RPi-specific bits (TPROXY, nftables) you can skip Docker — auth,
-nodes, routing rules and most of the UI work fine on macOS/Windows
-against a backend running on `localhost:8000`.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for PR conventions and code
 style.

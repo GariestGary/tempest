@@ -1,0 +1,12 @@
+FROM node:25-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --legacy-peer-deps && chown -R 1000:1000 /app
+
+COPY --chown=1000:1000 . .
+
+USER 1000:1000
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]

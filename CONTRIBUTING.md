@@ -1,45 +1,45 @@
-# Contributing to PiTun
+# Contributing to TEMPEST
 
-Thanks for considering a contribution. PiTun is a small project — most of
-the value of the codebase is in being **legible to one person reading it
-cold**, so the bar for changes is "would I be able to debug this in two
-years from a 30-second skim?"
+Thanks for considering a contribution. TEMPEST is a fork of
+[DaveBugg/PiTun](https://github.com/DaveBugg/PiTun), and preserves its
+upstream history and BSD-3-Clause notices. This repository is currently in
+phase 1; local application work uses only the safe no-op profile.
 
 By submitting a pull request you agree that your contribution is licensed
 under the project's BSD 3-Clause License (see [LICENSE](LICENSE)).
 
 ## Quick start
 
-```bash
-# Backend
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-python -m uvicorn app.main:app --reload --port 8000
+Use the dedicated safe Compose file. Do not start FastAPI directly without
+`DEV_SAFE_MODE=1`; its normal lifecycle retains upstream networking behavior.
 
-# Frontend
-cd frontend
-npm ci
-npm run dev   # http://localhost:5173
-
-# Tests
-cd backend && python -m pytest tests/ -q
-cd frontend && npm run test:ci
+```powershell
+docker compose -f docker-compose.dev.safe.yml config --quiet
+docker compose -f docker-compose.dev.safe.yml up --build
 ```
 
-The full Docker stack lives in `docker-compose.yml`. For local development
-without RPi-specific bits (TPROXY, nftables) you can skip Docker and run
-the two services directly — auth, nodes, routing rules and most of the UI
-work fine on a non-Linux dev box.
+UI is at <http://localhost:3000>, API at <http://localhost:8000>. Stop with
+`Ctrl+C` or run `docker compose -f docker-compose.dev.safe.yml down
+--remove-orphans`.
+
+Run tests separately from the application runtime:
+
+```bash
+cd backend && python -m pytest tests/ -q
+cd frontend && npm ci && npm run test:ci && npm run build && npm run lint
+```
+
+For a Linux VM runtime/security check, follow
+[`docs/dev/LINUX_VM.md`](docs/dev/LINUX_VM.md). Do not use the upstream
+production Compose or installer for TEMPEST development.
 
 ## Reporting bugs
 
 Open an issue with:
-1. PiTun version (sidebar → click `PiTun X.Y.Z` for the version popover,
-   then "Copy" — paste the JSON dump).
+1. TEMPEST version (sidebar → version popover → "Copy" — paste the JSON dump).
 2. What you expected to happen.
 3. What actually happened.
-4. Last ~50 lines of `docker compose logs backend` if relevant.
+4. Last ~50 lines of `docker compose -f docker-compose.dev.safe.yml logs api` if relevant.
 
 ## Pull requests
 

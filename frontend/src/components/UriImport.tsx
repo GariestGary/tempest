@@ -145,7 +145,7 @@ export function UriImport({ onDone, onCancel }: Props) {
         >
           <Upload className={clsx('h-8 w-8 mb-2', dragActive ? 'text-brand-400' : 'text-gray-600')} />
           <p className="text-sm text-gray-400">{dragActive ? 'Drop the file here' : 'Click to upload or drag & drop a nodes file'}</p>
-          <p className="text-xs text-gray-600 mt-1">Auto-detect: PiTun JSON bundle, URI list, Clash YAML, WireGuard .conf, base64</p>
+          <p className="text-xs text-gray-600 mt-1">Auto-detect: TEMPEST / legacy PiTun JSON bundle, URI list, Clash YAML, WireGuard .conf, base64</p>
           <input ref={fileRef} type="file" className="hidden" accept=".txt,.yaml,.yml,.json,.conf,.ini" onChange={handleFile} />
         </div>
       )}
@@ -155,7 +155,7 @@ export function UriImport({ onDone, onCancel }: Props) {
           value={uris}
           onChange={(e) => { setUris(e.target.value); setFileName(null) }}
           rows={10}
-          placeholder={`Paste proxy URIs (one per line) or a PiTun JSON bundle — format is auto-detected:\n\nvless://...\nvmess://...\ntrojan://...\nnaive+https://user:pass@example.com:443/?padding=1#MyNaive`}
+          placeholder={`Paste proxy URIs (one per line) or a TEMPEST JSON bundle — format is auto-detected:\n\nvless://...\nvmess://...\ntrojan://...\nnaive+https://user:pass@example.com:443/?padding=1#MyNaive`}
           className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-100 font-mono focus:border-brand-500 focus:outline-hidden resize-none"
         />
       )}
@@ -163,7 +163,7 @@ export function UriImport({ onDone, onCancel }: Props) {
       {uris.trim() && (
         <p className="text-[11px] text-gray-500">
           Detected format: <span className="font-mono text-gray-300">
-            {detectKind(uris) === 'json' ? 'PiTun JSON bundle' : 'URI list / Clash / base64'}
+            {detectKind(uris) === 'json' ? 'TEMPEST / PiTun JSON bundle' : 'URI list / Clash / base64'}
           </span>
         </p>
       )}

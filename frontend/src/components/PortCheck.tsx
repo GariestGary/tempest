@@ -77,7 +77,7 @@ export function PortCheck({
   const ufwText = (u: XuiPortStatus['ufw']) => {
     switch (u) {
       case 'allow': return t('ufw: open', 'ufw: открыт')
-      case 'closed': return t('ufw: closed (PiTun opens it on create)', 'ufw: закрыт (PiTun откроет при создании)')
+      case 'closed': return t('ufw: closed (TEMPEST opens it on create)', 'ufw: закрыт (TEMPEST откроет при создании)')
       case 'inactive': return t('ufw: off', 'ufw выключен')
       case 'absent': return t('no ufw', 'ufw нет')
       default: return null
@@ -92,7 +92,7 @@ export function PortCheck({
       parts.push(
         t(`inbound #${ib.id} "${ib.remark}"`, `инбаунд #${ib.id} "${ib.remark}"`)
         + (ib.enabled ? '' : t(' (disabled)', ' (выключен)'))
-        + (ib.known_here ? '' : t(' — not managed by this PiTun', ' — не из этого PiTun')),
+        + (ib.known_here ? '' : t(' — not managed by this TEMPEST', ' — не из этого TEMPEST')),
       )
     }
     if (r.listeners?.length) parts.push(t(`listening: ${r.listeners.join(', ')}`, `слушает: ${r.listeners.join(', ')}`))

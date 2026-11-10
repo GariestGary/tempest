@@ -138,8 +138,8 @@ export function TemplatePicker({
     const ok = await confirm({
       title: t('Delete custom template?', 'Удалить кастомный шаблон?'),
       body: t(
-        `"${tpl.label}" will be removed from PiTun. Servers currently using it will fall back to the script default on next deploy.`,
-        `"${tpl.label}" будет удалён из PiTun. Серверы, использующие его, при следующем деплое получат шаблон по умолчанию.`,
+        `"${tpl.label}" will be removed from TEMPEST. Servers currently using it will fall back to the script default on next deploy.`,
+        `"${tpl.label}" будет удалён из TEMPEST. Серверы, использующие его, при следующем деплое получат шаблон по умолчанию.`,
       ),
       confirmLabel: t('Delete', 'Удалить'),
       danger: true,

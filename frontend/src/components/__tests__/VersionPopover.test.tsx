@@ -63,7 +63,7 @@ describe('<VersionPopover>', () => {
 
   it('renders a trigger showing the short version', () => {
     render(wrap(<VersionPopover shortVersion="1.0.1" />))
-    expect(screen.getByRole('button', { name: /show all system versions/i })).toHaveTextContent('PiTun 1.0.1')
+    expect(screen.getByRole('button', { name: /show all system versions/i })).toHaveTextContent('TEMPEST 1.0.1')
   })
 
   it('does NOT fetch until clicked (lazy)', async () => {

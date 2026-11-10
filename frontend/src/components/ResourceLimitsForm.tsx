@@ -64,8 +64,8 @@ export function ResourceLimitsForm() {
     <div className="space-y-3">
       <p className="text-xs text-gray-400 max-w-3xl">
         {t(
-          'Off by default: nothing is limited. A cap keeps one part of PiTun from starving the rest of a small box, at the price that the part is killed (memory) or slowed (CPU) when it reaches it — so leave room above what it normally uses. Empty = no limit. Limits are applied to the running containers and put back after a restart.',
-          'По умолчанию выключено: ничего не ограничено. Лимит не даёт одной части PiTun задушить остальное на слабой коробке, но часть будет убита (память) или замедлена (CPU) при достижении лимита, поэтому оставляйте запас над обычным потреблением. Пусто = без лимита. Лимиты применяются к работающим контейнерам и возвращаются после перезапуска.',
+          'Off by default: nothing is limited. A cap keeps one part of TEMPEST from starving the rest of a small box, at the price that the part is killed (memory) or slowed (CPU) when it reaches it — so leave room above what it normally uses. Empty = no limit. Limits are applied to the running containers and put back after a restart.',
+          'По умолчанию выключено: ничего не ограничено. Лимит не даёт одной части TEMPEST задушить остальное на слабой коробке, но часть будет убита (память) или замедлена (CPU) при достижении лимита, поэтому оставляйте запас над обычным потреблением. Пусто = без лимита. Лимиты применяются к работающим контейнерам и возвращаются после перезапуска.',
         )}
       </p>
       <div className="overflow-x-auto">

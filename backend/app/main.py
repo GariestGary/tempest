@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import settings, APP_VERSION
 from app.database import create_db_and_tables, init_default_settings
@@ -54,9 +55,20 @@ async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────────────────────
     import asyncio
 
-    logger.info("PiTun backend starting up")
+    logger.info("TEMPEST backend starting up")
     await asyncio.to_thread(create_db_and_tables)
     await init_default_settings()
+
+    if settings.dev_safe_mode:
+        # Keep the API and database available for local UI work, but do not
+        # import/start any scheduler, Xray, router reconcile, sysctl, DNS,
+        # sidecar, or dataplane lifecycle code on this startup path.
+        logger.warning(
+            "TEMPEST DEV SAFE MODE: dataplane is a no-op; VPN traffic is not provided"
+        )
+        yield
+        logger.info("TEMPEST development safe mode shutting down")
+        return
 
     from app.core.xray import xray_manager
     from app.core.healthcheck import health_checker
@@ -297,7 +309,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────────────
-    logger.info("PiTun backend shutting down")
+    logger.info("TEMPEST backend shutting down")
     from app.core.geo_scheduler import geo_scheduler
 
     health_checker.stop()
@@ -333,13 +345,32 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="PiTun API",
+    title="TEMPEST API",
     version=APP_VERSION,
-    description="Transparent proxy manager for Raspberry Pi",
+    description="Self-hosted VPN gateway and egress orchestrator",
     lifespan=lifespan,
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
+from app.core.dev_safe_mode import DevSafeModeMiddleware
+app.add_middleware(DevSafeModeMiddleware)
+
+
+@app.get("/api/dev/safe-mode", tags=["meta"])
+async def dev_safe_mode_status():
+    """Public, read-only indicator used by the development UI banner."""
+    return {
+        "enabled": settings.dev_safe_mode,
+        "dataplane": "mock-noop" if settings.dev_safe_mode else "production",
+        "vpn_traffic_available": False if settings.dev_safe_mode else None,
+        "network_operations_enabled": not settings.dev_safe_mode,
+        "message": (
+            "Safe development profile: no Xray, VPN, DNS, route, firewall, "
+            "TUN, or sidecar operations are performed."
+            if settings.dev_safe_mode
+            else ""
+        ),
+    }
 
 # ── Exception handlers ───────────────────────────────────────────────────────
 # Lock-busy on the xray manager → 503 Service Unavailable.
@@ -437,7 +468,18 @@ async def health():
     we report 200 with `xray_running: false` — that's a valid operational
     state, not an error.
     """
-    from fastapi.responses import JSONResponse
+    if settings.dev_safe_mode:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "ok",
+                "dev_safe_mode": True,
+                "dataplane": "mock-noop",
+                "vpn_traffic_available": False,
+                "version": APP_VERSION,
+            },
+        )
+
     from app.core.xray import xray_manager
     from sqlmodel import select
     from sqlmodel.ext.asyncio.session import AsyncSession

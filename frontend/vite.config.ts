@@ -21,12 +21,14 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: process.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:8000',
+        target: process.env.VITE_DEV_PROXY_TARGET ||
+          process.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:8000',
         changeOrigin: true,
         ws: true,
       },
     },
   },
+  cacheDir: process.env.VITE_CACHE_DIR || 'node_modules/.vite',
   build: {
     outDir: 'dist',
     sourcemap: false,

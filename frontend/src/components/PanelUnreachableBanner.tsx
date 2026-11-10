@@ -28,8 +28,8 @@ export default function PanelUnreachableBanner() {
         <PlugZap className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
         <span className="text-xs text-red-800 dark:text-red-200">
           {t(
-            'PiTun is not answering at this address.',
-            'PiTun не отвечает по этому адресу.',
+            'TEMPEST is not answering at this address.',
+            'TEMPEST не отвечает по этому адресу.',
           )}{' '}
           {lan
             ? t(

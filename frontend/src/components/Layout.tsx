@@ -31,7 +31,7 @@ import {
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAppStore } from '@/store'
-import { useSystemStatus } from '@/hooks/useSystem'
+import { useDevSafeMode, useSystemStatus } from '@/hooks/useSystem'
 import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { authApi } from '@/api/client'
 import { VersionPopover } from '@/components/VersionPopover'
@@ -80,6 +80,7 @@ export function Layout() {
     lang, setLang, theme, setTheme,
   } = useAppStore()
   const { data: status } = useSystemStatus()
+  const { data: devSafeMode } = useDevSafeMode()
   const t = (en: string, ru: string) => (lang === 'ru' ? ru : en)
 
   // Always start with the mobile drawer closed on each fresh load —
@@ -248,7 +249,7 @@ export function Layout() {
               sidebarCollapsed && 'md:hidden',
             )}
           >
-            PiTun
+            TEMPEST
           </span>
         </div>
 
@@ -343,7 +344,7 @@ export function Layout() {
 
         {/* Status indicator + single-line version trigger.
             The 3 version lines that used to be here (xray / backend /
-            frontend) are now collapsed into a `PiTun X.Y.Z ⓘ` button
+            frontend) are now collapsed into a `TEMPEST X.Y.Z ⓘ` button
             that opens <VersionPopover /> with the full snapshot. Saves
             sidebar vertical space and scales to any number of versions
             (nginx, socket-proxy, kernel, alembic rev, geo mtimes…).
@@ -456,6 +457,22 @@ export function Layout() {
           width and child overflows are contained by the explicit
           `overflow-x-hidden` below. */}
       <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto pb-20 md:pb-0 bg-gray-900 dark:bg-surface">
+        {devSafeMode?.enabled && (
+          <div
+            role="status"
+            className="mx-4 mt-4 rounded-lg border border-amber-500/60 bg-amber-950/70 px-4 py-3 text-sm text-amber-100"
+          >
+            <div className="font-semibold">
+              {t('SAFE DEVELOPMENT MODE — VPN traffic is disabled', 'БЕЗОПАСНЫЙ РЕЖИМ РАЗРАБОТКИ — VPN-трафик отключён')}
+            </div>
+            <div className="mt-1 text-amber-200/90">
+              {t(
+                'The dataplane is a no-op. Network-changing APIs are blocked; selected database-only objects remain editable.',
+                'Dataplane не выполняет операции. Сетевые API заблокированы; доступны только выбранные объекты БД.',
+              )}
+            </div>
+          </div>
+        )}
         {/* Whoever must confirm may have reloaded onto any page — the undo
            timer can't live inside one settings section. */}
         <PanelUnreachableBanner />

@@ -321,7 +321,7 @@ export function Nodes() {
           <button
             onClick={() => setModal('import')}
             className="flex items-center gap-1.5 rounded-lg bg-gray-700 px-3 py-2 text-sm text-gray-200 hover:bg-gray-600 transition-colors"
-            title={t('Import nodes — paste URIs or upload a PiTun JSON bundle; format is auto-detected', 'Импорт нод — вставьте URI или загрузите PiTun JSON; формат определяется автоматически')}
+            title={t('Import nodes — paste URIs or upload a TEMPEST / legacy PiTun JSON bundle; format is auto-detected', 'Импорт нод — вставьте URI или загрузите JSON TEMPEST / старого PiTun; формат определяется автоматически')}
           >
             <FileUp className="h-4 w-4" />
             {t('Import', 'Импорт')}

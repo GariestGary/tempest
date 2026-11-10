@@ -445,6 +445,14 @@ export interface SystemStatus {
   last_xray_validation_error?: string | null
 }
 
+export interface DevSafeModeStatus {
+  enabled: boolean
+  dataplane: string
+  vpn_traffic_available: boolean | null
+  network_operations_enabled: boolean
+  message: string
+}
+
 // Full version snapshot for the VersionPopover / Settings About tab.
 // Populated live from `/api/system/versions` — PiTun-owned fields come
 // from APP_VERSION, everything else is introspected at request time.

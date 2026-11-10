@@ -116,11 +116,13 @@ _HOST_RESOLV = "/host/resolv.conf"  # bind-mounted from host /etc/resolv.conf
 
 
 async def apply_system_toggles_on_boot() -> None:
-    """Apply disable_ipv6 and dns_over_tcp from DB to host on startup.
+    """Apply saved IPv6 and resolver settings unless safe mode is enabled."""
+    from app.config import settings as app_settings
 
-    /proc/sys values reset after reboot, so we re-apply saved state.
-    resolv.conf survives reboot, but we ensure consistency anyway.
-    """
+    if app_settings.dev_safe_mode:
+        logger.info("Skipped host system toggles in development safe mode")
+        return
+
     import logging
     _log = logging.getLogger(__name__)
 
@@ -219,6 +221,32 @@ async def _collect_vpn_server_ips(session: AsyncSession) -> List[str]:
 
 @router.get("/status", response_model=SystemStatus)
 async def get_status(session: AsyncSession = Depends(get_session)):
+    from app.config import APP_VERSION, settings as app_settings
+
+    if app_settings.dev_safe_mode:
+        mode = await _get_setting(session, "mode") or "rules"
+        active_id_str = await _get_setting(session, "active_node_id") or ""
+        active_node = None
+        active_node_id = None
+        if active_id_str:
+            try:
+                active_node_id = int(active_id_str)
+                active_node = await session.get(Node, active_node_id)
+            except ValueError:
+                pass
+        return SystemStatus(
+            running=False,
+            pid=None,
+            uptime_seconds=0,
+            mode=mode,
+            active_node_id=active_node_id,
+            active_node_name=active_node.name if active_node else None,
+            nftables_active=False,
+            version="disabled (safe development mode)",
+            app_version=APP_VERSION,
+            last_xray_validation_error=None,
+        )
+
     from app.core.xray import xray_manager
     from app.core.nftables import nftables_manager
 
@@ -241,7 +269,6 @@ async def get_status(session: AsyncSession = Depends(get_session)):
     # — frontend hides the banner.
     last_validation_error = await _get_setting(session, "last_xray_validation_error")
 
-    from app.config import APP_VERSION
     return SystemStatus(
         running=xray_manager.is_running,
         pid=xray_manager.pid,
@@ -392,6 +419,12 @@ def _short_tag(tag: str) -> str:
 
 async def _apply_nftables(session: AsyncSession, settings_map: dict) -> str:
     """Apply nftables rules with device filtering. Returns inbound_mode."""
+    from app.config import settings as app_settings
+
+    if app_settings.dev_safe_mode:
+        logger.info("Ignored nftables apply in development safe mode")
+        return settings_map.get("inbound_mode", "tproxy")
+
     from app.core.nftables import nftables_manager, RoutingSetSpec
     from app.core.config_gen import collect_routing_set_context
 
@@ -705,7 +738,8 @@ async def get_settings(session: AsyncSession = Depends(get_session)):
         if router_mode_on
         else (m.get("interface") or env_settings.interface)
     )
-    detected_ip = _detect_ip(iface)
+    safe_dev_mode = env_settings.dev_safe_mode
+    detected_ip = "" if safe_dev_mode else _detect_ip(iface)
     effective_ip = detected_ip or m.get("gateway_ip") or env_settings.gateway_ip
     if detected_ip and m.get("gateway_ip") != detected_ip and not router_mode_on:
         row = await session.exec(select(DBSettings).where(DBSettings.key == "gateway_ip"))
@@ -722,7 +756,9 @@ async def get_settings(session: AsyncSession = Depends(get_session)):
     # that would silently overwrite a deliberate manual value if the
     # interface ever flips to a different subnet.
     db_cidr = m.get("lan_cidr")
-    detected_cidr = _detect_cidr(iface) if not db_cidr else ""
+    detected_cidr = (
+        "" if safe_dev_mode else (_detect_cidr(iface) if not db_cidr else "")
+    )
     effective_cidr = db_cidr or detected_cidr or env_settings.lan_cidr
 
     return SettingsRead(
@@ -798,8 +834,19 @@ async def get_settings(session: AsyncSession = Depends(get_session)):
         wan_static_dns=m.get("wan_static_dns", ""),
         wan_pppoe_user=m.get("wan_pppoe_user", ""),
         wan_pppoe_service=m.get("wan_pppoe_service", ""),
-        disable_ipv6=_detect_sysctl_bool("net.ipv6.conf.all.disable_ipv6", m.get("disable_ipv6", "false").lower() == "true"),
-        dns_over_tcp=_detect_resolv_use_vc(m.get("dns_over_tcp", "false").lower() == "true"),
+        disable_ipv6=(
+            m.get("disable_ipv6", "false").lower() == "true"
+            if safe_dev_mode else _detect_sysctl_bool(
+                "net.ipv6.conf.all.disable_ipv6",
+                m.get("disable_ipv6", "false").lower() == "true",
+            )
+        ),
+        dns_over_tcp=(
+            m.get("dns_over_tcp", "false").lower() == "true"
+            if safe_dev_mode else _detect_resolv_use_vc(
+                m.get("dns_over_tcp", "false").lower() == "true"
+            )
+        ),
         health_interval=_int("health_interval", env_settings.health_interval),
         health_timeout=_int("health_timeout", env_settings.health_timeout),
         health_full_check_interval=_int("health_full_check_interval", 300),

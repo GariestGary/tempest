@@ -137,20 +137,20 @@ function ConfirmView(props: {
     ? [
         t('Caddy package + /etc/caddy/ + /var/log/caddy/', 'Пакет Caddy + /etc/caddy/ + /var/log/caddy/'),
         t('Decoy site under /var/www/html/', 'Сайт-приманка в /var/www/html/'),
-        t('PiTun-side ServerDeployment row (config metadata)', 'Запись ServerDeployment в PiTun (метаданные конфига)'),
+        t('TEMPEST-side ServerDeployment row (config metadata)', 'Запись ServerDeployment в TEMPEST (метаданные конфига)'),
       ]
     : props.protocol === 'xui'
     ? [
         t('x-ui systemd unit + binary + /etc/x-ui/', 'systemd-юнит x-ui + бинарь + /etc/x-ui/'),
         t('nginx (purged) + /var/www/html/ (xui-pro mode only)', 'nginx (полное удаление) + /var/www/html/ (только в xui-pro режиме)'),
         t('certbot + tor + warp-plus (if installed by xui-pro)', 'certbot + tor + warp-plus (если ставились x-ui-pro)'),
-        t('PiTun-side XuiServer + XuiClient rows (cascade-delete)', 'Записи XuiServer + XuiClient в PiTun (каскадное удаление)'),
+        t('TEMPEST-side XuiServer + XuiClient rows (cascade-delete)', 'Записи XuiServer + XuiClient в TEMPEST (каскадное удаление)'),
         t('Linked Node(s) kept; chain inbounds removed via panel API', 'Связанные Node-ы остаются; chain-инбаунды удаляются через API'),
       ]
     : [
         t('wg-quick@wg0 (stop + disable) + iptables NAT rules', 'wg-quick@wg0 (стоп + disable) + iptables NAT'),
         t('/etc/wireguard/ (server keys + peer configs)', '/etc/wireguard/ (ключи сервера + конфиги пиров)'),
-        t('PiTun-side DeploymentClient rows (cascade-delete)', 'Записи DeploymentClient в PiTun (каскадное удаление)'),
+        t('TEMPEST-side DeploymentClient rows (cascade-delete)', 'Записи DeploymentClient в TEMPEST (каскадное удаление)'),
         t('Linked Node(s) flagged as `orphan` (kept)', 'Связанные Node-ы помечаются как `orphan` (не удаляются)'),
       ]
   return (

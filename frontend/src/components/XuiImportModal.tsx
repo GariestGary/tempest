@@ -99,8 +99,8 @@ export function XuiImportModal({ onClose }: { onClose: () => void }) {
         </h2>
         <p className="text-xs text-gray-500 leading-relaxed">
           {t(
-            'For a panel PiTun did not install: one set up by hand, inherited with the server, or whose install line was lost. Nothing is reinstalled — the panel is only registered.',
-            'Для панели, которую PiTun не устанавливал: поднятой вручную, доставшейся вместе с сервером или потерявшей строку установки. Ничего не переустанавливается — панель только регистрируется.',
+            'For a panel TEMPEST did not install: one set up by hand, inherited with the server, or whose install line was lost. Nothing is reinstalled — the panel is only registered.',
+            'Для панели, которую TEMPEST не устанавливал: поднятой вручную, доставшейся вместе с сервером или потерявшей строку установки. Ничего не переустанавливается — панель только регистрируется.',
           )}
         </p>
 
@@ -175,8 +175,8 @@ export function XuiImportModal({ onClose }: { onClose: () => void }) {
                                     'оставьте пустым для обычной панели') })}
             <p className="text-[10px] text-gray-600">
               {t(
-                "The API token isn't asked for — PiTun logs in with these and takes it from the panel.",
-                'API-токен спрашивать не нужно — PiTun войдёт с этими данными и возьмёт его сам.',
+                "The API token isn't asked for — TEMPEST logs in with these and takes it from the panel.",
+                'API-токен спрашивать не нужно — TEMPEST войдёт с этими данными и возьмёт его сам.',
               )}
             </p>
           </div>

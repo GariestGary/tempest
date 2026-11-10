@@ -1,13 +1,16 @@
-# PiTun
+# TEMPEST
 
 **🌐 Languages:** [English](README.md) · **Русский**
 
-> Самохостинговый роутер и менеджер прозрачного прокси для Raspberry
-> Pi 4/5 (или любого другого Linux-сервера). Может стоять **рядом** с
-> роутером, а может **быть** роутером — брать линию провайдера,
-> раздавать адреса, делать NAT и Wi-Fi. В обоих случаях перехватывает
-> LAN-трафик через nftables TPROXY и маршрутизирует его через xray-core
-> по вашим правилам — домен, GeoIP, GeoSite, MAC, порт, протокол.
+> TEMPEST — self-hosted VPN-шлюз и оркестратор исходящих подключений
+> для Linux, форк [DaveBugg/PiTun](https://github.com/DaveBugg/PiTun).
+> Репозиторий находится на этапе 1: разрешён только безопасный dev-профиль
+> без сетевых операций; VPN-трафик и управление сетью хоста в нём отключены.
+
+> **Справка upstream:** разделы установки, router mode и функций ниже
+> сохранены из документации PiTun для сравнения. Они описывают upstream
+> и не являются инструкцией по развёртыванию TEMPEST. Используйте
+> [безопасный dev-профиль](docs/DEV_SAFE_MODE.md).
 
 [![CI](https://img.shields.io/github/actions/workflow/status/DaveBugg/PiTun/ci.yml?branch=master&label=CI)](#)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
@@ -918,27 +921,26 @@ SSH-сессию до подтверждения если ты не на лок�
 
 ## Разработка
 
-```bash
-# Бэкенд
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-python -m uvicorn app.main:app --reload --port 8000
-python -m pytest tests/ -q
+Используйте отдельный Compose-профиль с no-op dataplane. Он публикует
+UI и API только на loopback и не запускает Xray, DNS, nftables,
+маршруты, TUN, router mode или Docker sidecars.
 
-# Фронтенд
-cd frontend
-npm ci
-npm run dev          # http://localhost:5173
-npm run build        # tsc + vite (отлавливает type errors)
-npm run test:ci
-npm run lint
+```powershell
+docker compose -f docker-compose.dev.safe.yml config --quiet
+docker compose -f docker-compose.dev.safe.yml up --build
 ```
 
-Полный Docker-стек — в `docker-compose.yml`. Для локальной разработки
-UI без RPi-специфики (TPROXY, nftables) Docker не обязателен — auth,
-ноды, правила маршрутизации и большая часть UI работают на macOS/Windows
-против бэкенда на `localhost:8000`.
+UI: <http://localhost:3000>. API: <http://localhost:8000>.
+Остановка: `docker compose -f docker-compose.dev.safe.yml down
+--remove-orphans`. Инструкция также содержит команды reset и список
+разрешённых операций: [`docs/DEV_SAFE_MODE.md`](docs/DEV_SAFE_MODE.md).
+
+Для отдельной Linux VM подготовлен воспроизводимый smoke-скрипт:
+`sudo bash ./scripts/dev-safe-compose-smoke.sh`. Он проверяет Compose build/up,
+health, login, DB-only CRUD, запрет сетевых API, свойства контейнеров,
+restart, teardown и снимает сетевое состояние VM до/после. Runtime
+проверка ожидает доступную изолированную VM и Docker Engine; на TORNADO
+Engine пока недоступен. См. [инструкцию VM](docs/dev/LINUX_VM.md).
 
 См. [`CONTRIBUTING.md`](CONTRIBUTING.md) — конвенции PR и стиль кода.
 

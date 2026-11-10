@@ -105,8 +105,8 @@ export function ManageClientsModal({
       title: t('Remove client?', 'Удалить клиента?'),
       body:
         t(
-          `"${c.name}" will be removed from wg0.conf on the server and from PiTun.`,
-          `"${c.name}" будет удалён из wg0.conf на сервере и из PiTun.`,
+          `"${c.name}" will be removed from wg0.conf on the server and from TEMPEST.`,
+          `"${c.name}" будет удалён из wg0.conf на сервере и из TEMPEST.`,
         ) +
         (exportedCount > 0
           ? ' ' +

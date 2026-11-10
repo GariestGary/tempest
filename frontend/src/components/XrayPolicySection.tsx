@@ -195,7 +195,7 @@ export function XrayPolicySection({ servers }: { servers: XuiServer[] }) {
           {t('Connection lifetime (Xray policy)', 'Время жизни соединений (политика Xray)')}
         </h2>
         <InfoTip text={t(
-          "Applies to PiTun's own Xray and to every panel template. Xray's built-in defaults are tuned for short browser sessions and drop long-lived connections; these values keep agent and streaming traffic alive.",
+          "Applies to TEMPEST's own Xray and to every panel template. Xray's built-in defaults are tuned for short browser sessions and drop long-lived connections; these values keep agent and streaming traffic alive.",
           'Применяется к собственному Xray коробки и к шаблонам всех панелей. Встроенные дефолты Xray рассчитаны на короткие браузерные сессии и рвут долгоживущие соединения; эти значения сохраняют трафик агентов и стримов.',
         )} />
       </div>

@@ -1,7 +1,8 @@
 version: "3.9"
 
-# Standalone dev compose for Windows/macOS
-# Usage: docker compose -f docker-compose.dev.yml up --build
+# Legacy upstream PiTun dev compose; it does not enable TEMPEST DEV_SAFE_MODE.
+# Do not use for TEMPEST development. Use docker-compose.dev.safe.yml instead.
+# Standalone upstream development notes for Windows/macOS follow.
 # UI: http://localhost:3000  |  API: http://localhost:3000/api
 
 services:

@@ -34,6 +34,7 @@ from typing import Optional
 from fastapi import BackgroundTasks
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.dev_safe_mode import is_dev_safe_mode
 from app.database import get_async_engine
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,13 @@ async def apply_dataplane(action: Action = "reload") -> None:
     xray first so its inbounds are live, nftables second so the redirects
     point at a listening port.
     """
+    if is_dev_safe_mode():
+        logger.warning(
+            "Ignored dataplane action %s because TEMPEST development safe mode is active",
+            action,
+        )
+        return
+
     from app.api.system import (
         _apply_nftables,
         _collect_vpn_server_ips,
@@ -120,6 +128,12 @@ async def dispatch_dataplane(
     background_tasks: Optional[BackgroundTasks], action: Action = "reload",
 ) -> None:
     """Apply now, or after the response when `background_tasks` is given."""
+    if is_dev_safe_mode():
+        logger.info(
+            "Dataplane action %s recorded as no-op in TEMPEST development safe mode",
+            action,
+        )
+        return
     if background_tasks is None:
         await apply_dataplane(action)
         return

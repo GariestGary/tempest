@@ -268,7 +268,7 @@ export function Devices() {
               {onlineCount} {t('of', 'из')} {devices.length}
             </span>
           </div>
-          <div className="mt-0.5 text-xs text-gray-600 truncate">{t('proxied via PiTun', 'трафик через PiTun')}</div>
+          <div className="mt-0.5 text-xs text-gray-600 truncate">{t('proxied via TEMPEST', 'трафик через TEMPEST')}</div>
         </div>
 
         {/* Offline */}

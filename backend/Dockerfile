@@ -133,3 +133,10 @@ RUN mkdir -p /tmp/pitun /app/data
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# Rootless development target. The normal dev/production targets retain
+# their upstream runtime semantics; only the dedicated TEMPEST safe profile uses
+# this UID and is combined with a read-only container root filesystem.
+FROM dev AS dev-safe
+RUN mkdir -p /tmp/tempest /app/data && chown -R 10001:10001 /tmp/tempest /app/data
+USER 10001:10001

@@ -443,8 +443,8 @@ function DeployForm(props: {
         <FieldL
           label={t('SSH port (optional)', 'SSH-порт (опционально)')}
           hint={t(
-            'leave blank to keep current — applied at install time, persisted in PiTun',
-            'оставьте пустым — текущий не трогаем; применяется на установке, PiTun запомнит',
+            'leave blank to keep current — applied at install time, persisted in TEMPEST',
+            'оставьте пустым — текущий не трогаем; применяется на установке, TEMPEST запомнит',
           )}
         >
           <SshPortField

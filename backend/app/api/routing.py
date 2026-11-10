@@ -156,6 +156,9 @@ async def _auto_reload_xray(
 
     No-op when xray isn't running — `/system/start` builds both layers.
     """
+    from app.config import settings
+    if settings.dev_safe_mode:
+        return
     try:
         from app.core.xray import xray_manager
         if not xray_manager.is_running:

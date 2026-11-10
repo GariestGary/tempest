@@ -87,7 +87,7 @@ export function VersionPopover({ shortVersion }: Props) {
         )}
         aria-label="Show all system versions"
       >
-        <span>PiTun {shortVersion}</span>
+        <span>TEMPEST {shortVersion}</span>
         <Info className="h-3 w-3" />
       </button>
 
@@ -136,7 +136,7 @@ export function VersionPopover({ shortVersion }: Props) {
 function VersionTable({ data }: { data: SystemVersions }) {
   return (
     <div className="space-y-3 text-xs font-mono">
-      <Section title="PiTun">
+      <Section title="TEMPEST">
         <Row k="backend" v={data.pitun.backend} />
         <Row k="naive image" v={data.pitun.naive_image} />
         <Row k="frontend" v={__APP_VERSION__} />
@@ -199,7 +199,7 @@ function formatForClipboard(d: SystemVersions): string {
   const add = (k: string, v?: string | null) => {
     if (v) lines.push(`  ${k.padEnd(14)} ${v}`)
   }
-  lines.push('PiTun')
+  lines.push('TEMPEST')
   add('backend',     d.pitun.backend)
   add('frontend',    __APP_VERSION__)
   add('naive image', d.pitun.naive_image)

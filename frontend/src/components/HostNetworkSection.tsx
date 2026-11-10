@@ -98,7 +98,7 @@ export default function HostNetworkSection() {
       {state && (
         <>
           {/* Warnings get top billing — these are the things that ruin
-             your day if you ignore them. The "another PiTun upstream"
+             your day if you ignore them. The "another TEMPEST upstream"
              one is the primary motivator for this whole page. */}
           {state.warnings.length > 0 && (
             <div className="space-y-2">
@@ -152,7 +152,7 @@ export default function HostNetworkSection() {
               value={state.ip
                 ? `${state.ip}${state.cidr != null ? `/${state.cidr}` : ''}`
                 : '—'}
-              sub={t('LAN clients reach the PiTun web UI here.', 'LAN-клиенты заходят на веб-морду по этому адресу.')}
+              sub={t('LAN clients reach the TEMPEST web UI here.', 'LAN-клиенты заходят на веб-морду по этому адресу.')}
               mono
             />
             <StateCard
@@ -161,12 +161,12 @@ export default function HostNetworkSection() {
               value={state.gateway || '—'}
               sub={selfLoop
                 ? t(
-                    'SELF-LOOP: this points at PiTun itself. Set it to your ISP router below.',
-                    'SELF-LOOP: указывает на сам PiTun. Задайте адрес ISP-роутера ниже.',
+                    'SELF-LOOP: this points at TEMPEST itself. Set it to your ISP router below.',
+                    'SELF-LOOP: указывает на сам TEMPEST. Задайте адрес ISP-роутера ниже.',
                   )
                 : t(
-                    'Where this PiTun sends outbound traffic. Should point at your ISP router, not another PiTun.',
-                    'Куда сам PiTun отправляет исходящий трафик. Должен указывать на ваш ISP-роутер, не на другой PiTun.',
+                    'Where this TEMPEST sends outbound traffic. Should point at your ISP router, not another TEMPEST.',
+                    'Куда сам TEMPEST отправляет исходящий трафик. Должен указывать на ваш ISP-роутер, не на другой TEMPEST.',
                   )}
               mono
               danger={selfLoop}

@@ -225,8 +225,8 @@ function DnsSettingsSection({
           <label className="block text-xs text-gray-400 mb-1">
             {t('IP version for client DNS', 'Версия IP для клиентского DNS')}
             <InfoTip className="ml-1" text={t(
-              'What address types xray returns to LAN clients. UseIPv4 (recommended) returns only A records — prevents the IPv6 bypass leak: PiTun TPROXY is IPv4-only, so an AAAA answer would let a client route IPv6 around the proxy via the router. Change only if you handle IPv6 elsewhere.',
-              'Какие типы адресов xray отдаёт LAN-клиентам. UseIPv4 (рекомендуется) отдаёт только A-записи — закрывает IPv6-утечку: TPROXY у PiTun только IPv4, и AAAA-ответ позволил бы клиенту обойти прокси по IPv6 через роутер. Меняй только если IPv6 обрабатывается иначе.',
+              'What address types xray returns to LAN clients. UseIPv4 (recommended) returns only A records — prevents the IPv6 bypass leak: TEMPEST TPROXY is IPv4-only, so an AAAA answer would let a client route IPv6 around the proxy via the router. Change only if you handle IPv6 elsewhere.',
+              'Какие типы адресов xray отдаёт LAN-клиентам. UseIPv4 (рекомендуется) отдаёт только A-записи — закрывает IPv6-утечку: TPROXY у TEMPEST только IPv4, и AAAA-ответ позволил бы клиенту обойти прокси по IPv6 через роутер. Меняй только если IPv6 обрабатывается иначе.',
             )} />
           </label>
           <select
@@ -246,8 +246,8 @@ function DnsSettingsSection({
         <div className="text-xs font-semibold text-gray-300 flex items-center gap-1.5 flex-wrap">
           {t('Host resolver (this box only)', 'Резолвер хоста (только эта машина)')}
           <InfoTip text={t(
-            "Separate from the client DNS above. The DNS Rules and servers above control what your LAN devices resolve through xray. THIS controls how the PiTun box ITSELF resolves names — for fetching subscriptions, downloading geo files, reaching x-ui panels, and the Dashboard health checks. By default the box uses only your router as DNS; if the router's DNS flakes, all of that breaks (even though LAN clients keep working). Adding public fallbacks below keeps the box resolving when the router can't.",
-            'Отдельно от клиентского DNS выше. DNS-правила и серверы выше управляют тем, что резолвят твои LAN-устройства через xray. ЭТО управляет тем, как сама машина PiTun резолвит имена — для загрузки подписок, гео-файлов, доступа к x-ui панелям и health-проверок на Dashboard. По умолчанию машина использует как DNS только твой роутер; если DNS роутера моргнёт — всё это ломается (хотя LAN-клиенты продолжают работать). Публичные fallback ниже держат машину работающей когда роутер не может.',
+            "Separate from the client DNS above. The DNS Rules and servers above control what your LAN devices resolve through xray. THIS controls how the TEMPEST box ITSELF resolves names — for fetching subscriptions, downloading geo files, reaching x-ui panels, and the Dashboard health checks. By default the box uses only your router as DNS; if the router's DNS flakes, all of that breaks (even though LAN clients keep working). Adding public fallbacks below keeps the box resolving when the router can't.",
+            'Отдельно от клиентского DNS выше. DNS-правила и серверы выше управляют тем, что резолвят твои LAN-устройства через xray. ЭТО управляет тем, как сама машина TEMPEST резолвит имена — для загрузки подписок, гео-файлов, доступа к x-ui панелям и health-проверок на Dashboard. По умолчанию машина использует как DNS только твой роутер; если DNS роутера моргнёт — всё это ломается (хотя LAN-клиенты продолжают работать). Публичные fallback ниже держат машину работающей когда роутер не может.',
           )} />
           <HostDnsHelp highlight="resolver" />
         </div>

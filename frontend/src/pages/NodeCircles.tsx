@@ -781,8 +781,8 @@ function FailoverToggle() {
           <p className="mt-1 text-xs text-gray-500 leading-relaxed">
             {enabled ? (
               t(
-                'Active. When the active node fails, PiTun rotates within its NodeCircle (if any) or falls back to the list below.',
-                'Включено. При падении активной ноды PiTun ротирует в её NodeCircle (если есть) или к списку ниже.',
+                'Active. When the active node fails, TEMPEST rotates within its NodeCircle (if any) or falls back to the list below.',
+                'Включено. При падении активной ноды TEMPEST ротирует в её NodeCircle (если есть) или к списку ниже.',
               )
             ) : (
               t(
@@ -804,8 +804,8 @@ function FailoverToggle() {
               {t('Fallback nodes', 'Fallback-ноды')}
             </span>
             <InfoTip position="bottom" text={t(
-              'Used only when the failed node is NOT in any enabled NodeCircle (or the circle has no live siblings). PiTun probes these in order; the first alive one becomes active. Leave empty if you only use circles.',
-              'Используются когда упавшая нода НЕ в круге (или в круге все мертвы). PiTun пробит их по порядку; первая живая становится активной. Можно оставить пустым если используешь только круги.',
+              'Used only when the failed node is NOT in any enabled NodeCircle (or the circle has no live siblings). TEMPEST probes these in order; the first alive one becomes active. Leave empty if you only use circles.',
+              'Используются когда упавшая нода НЕ в круге (или в круге все мертвы). TEMPEST пробит их по порядку; первая живая становится активной. Можно оставить пустым если используешь только круги.',
             )} />
             <span className="ml-auto text-[11px] text-gray-600">
               {fallbackIds.size} {t('selected', 'выбрано')}

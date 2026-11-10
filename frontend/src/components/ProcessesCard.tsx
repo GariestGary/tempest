@@ -38,7 +38,7 @@ export function ProcessesCard() {
       <div className="px-4 py-3 border-b border-gray-800">
         <h2 className="text-sm font-semibold text-gray-200 flex items-center gap-2">
           <Boxes className="h-4 w-4 text-brand-400" />
-          {t('What PiTun is using', 'Что использует PiTun')}
+          {t('What TEMPEST is using', 'Что использует TEMPEST')}
         </h2>
         <p className="text-[11px] text-gray-500 mt-0.5">
           {t(

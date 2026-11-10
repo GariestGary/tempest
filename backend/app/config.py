@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     secret_key: str = "changeme"
     backend_port: int = 8000
     cors_origins: str = "http://localhost:5173,http://localhost:80"
+    # Explicit opt-in for the local, non-networking development profile.
+    # Production behaviour remains unchanged unless DEV_SAFE_MODE is set.
+    dev_safe_mode: bool = False
 
     # Database
     database_url: str = "sqlite:///./data/pitun.db"

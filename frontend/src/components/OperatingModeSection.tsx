@@ -145,8 +145,8 @@ export default function OperatingModeSection({
             <div className="space-y-1">
               <div>
                 {t(
-                  'A network card is present but produced no interface, so PiTun cannot use it.',
-                  'Сетевая карта присутствует, но интерфейс не создан — PiTun её использовать не может.',
+                  'A network card is present but produced no interface, so TEMPEST cannot use it.',
+                  'Сетевая карта присутствует, но интерфейс не создан — TEMPEST её использовать не может.',
                 )}
               </div>
               {unclaimed.map((u) => (
@@ -193,8 +193,8 @@ export default function OperatingModeSection({
               </div>
               <div className="text-[11px] text-gray-500 mt-0.5">
                 {t(
-                  'Devices point their gateway at PiTun; your existing router keeps doing DHCP and NAT. Works on any hardware, including a single port.',
-                  'Устройства указывают шлюзом PiTun; DHCP и NAT остаются на вашем роутере. Работает на любом железе, в том числе с одним портом.',
+                  'Devices point their gateway at TEMPEST; your existing router keeps doing DHCP and NAT. Works on any hardware, including a single port.',
+                  'Устройства указывают шлюзом TEMPEST; DHCP и NAT остаются на вашем роутере. Работает на любом железе, в том числе с одним портом.',
                 )}
               </div>
             </div>
@@ -221,12 +221,12 @@ export default function OperatingModeSection({
             />
             <div>
               <div className="text-[12px] text-gray-200">
-                {t('Router — PiTun is the router', 'Роутер — PiTun и есть роутер')}
+                {t('Router — TEMPEST is the router', 'Роутер — TEMPEST и есть роутер')}
               </div>
               <div className="text-[11px] text-gray-500 mt-0.5">
                 {t(
-                  'PiTun owns the ISP uplink, hands out addresses on the LAN and does NAT. Needs two or more ports.',
-                  'PiTun берёт на себя аплинк провайдера, раздаёт адреса в LAN и делает NAT. Нужно два и более порта.',
+                  'TEMPEST owns the ISP uplink, hands out addresses on the LAN and does NAT. Needs two or more ports.',
+                  'TEMPEST берёт на себя аплинк провайдера, раздаёт адреса в LAN и делает NAT. Нужно два и более порта.',
                 )}
               </div>
             </div>
@@ -428,8 +428,8 @@ export default function OperatingModeSection({
           <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-950/30 p-2 text-[11px] text-amber-800 dark:text-amber-300">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             {t(
-              'Saving this reconfigures the network immediately: the WAN port stops accepting new connections from outside, and the LAN port starts serving DHCP. If it goes wrong, PiTun reverts to gateway on its own unless you confirm — but do this with physical access to the box, not over SSH from the network it is about to change.',
-              'Сохранение сразу перестраивает сеть: WAN-порт перестанет принимать новые входящие соединения, а LAN-порт начнёт раздавать DHCP. Если что-то пойдёт не так, PiTun сам вернётся в режим шлюза, пока вы не подтвердите, — но делайте это с физическим доступом к коробке, а не по SSH из той самой сети, которую перестраиваете.',
+              'Saving this reconfigures the network immediately: the WAN port stops accepting new connections from outside, and the LAN port starts serving DHCP. If it goes wrong, TEMPEST reverts to gateway on its own unless you confirm — but do this with physical access to the box, not over SSH from the network it is about to change.',
+              'Сохранение сразу перестраивает сеть: WAN-порт перестанет принимать новые входящие соединения, а LAN-порт начнёт раздавать DHCP. Если что-то пойдёт не так, TEMPEST сам вернётся в режим шлюза, пока вы не подтвердите, — но делайте это с физическим доступом к коробке, а не по SSH из той самой сети, которую перестраиваете.',
             )}
           </div>
         )}

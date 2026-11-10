@@ -37,7 +37,7 @@ describe('<Login>', () => {
 
   it('renders heading, two inputs, and a submit button', () => {
     const { container } = render(<Login />)
-    expect(screen.getByText('PiTun')).toBeInTheDocument()
+    expect(screen.getByText('TEMPEST')).toBeInTheDocument()
     const { username, password } = fields(container)
     expect(username).toBeInTheDocument()
     expect(password).toBeInTheDocument()

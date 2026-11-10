@@ -5,7 +5,7 @@
 ## Current instructions
 
 - Product name: **TEMPEST** (no version suffix). Fork base: `DaveBugg/PiTun` (`master`, BSD-3-Clause).
-- **Only work on the current `NEXT`/`IN_PROGRESS` phase. Initially: PHASE 0.** Do not begin the next phase without the user's explicit approval.
+- **Current phase: PHASE 1 (`READY_FOR_REVIEW`). PHASE 0 was accepted by the user on 2026-11-10.** Continue only phase 1 until review/acceptance; do not begin phase 2 without explicit approval.
 - Reuse PiTun architecture/tests and preserve upstream history/license. Do not rewrite the backend in .NET.
 - **No automatic geo-content unblocking detection.** Geo-specific routing is user-managed via explicit rules. AUTO is limited to transport-level health/failover within approved candidates.
 - **No root/host takeover from Web/API.** Do not run privileged PiTun Compose, change DNS/default routes/firewall, use host Docker socket, or modify host-wide networking while auditing.
@@ -23,6 +23,6 @@
 5. Report changed files, commands/tests, pass/fail, risks, unverified scenarios, and commit SHA.
 6. Stop and ask for approval before moving to the next phase.
 
-## First session / phase 0
+## Accepted phase 0 baseline
 
-Audit PiTun, document baseline SHA, sensitive host operations, feature gaps, test commands, and ADR-001 privilege separation. Do **not** start feature implementation, rename everything or deploy on VORTEX. See tasks 0.1–0.10 and Gate 0 in the spec.
+The baseline SHA, host-operation audit, feature gap matrix, test commands, and proposed ADR-001 are recorded in `docs/`. Phase 0 is accepted. Current authorized work is phase 1 only; do **not** start feature implementation beyond its dev/test scope, deploy on VORTEX, or move to phase 2 without explicit user approval.

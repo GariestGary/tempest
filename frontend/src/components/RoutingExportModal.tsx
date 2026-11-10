@@ -124,8 +124,8 @@ export function RoutingExportModal({
 
           <p className="text-[13px] text-gray-400">
             {t(
-              'Pick which scopes to export. Native PiTun format — preserves every rule field and the set names.',
-              'Выбери области для экспорта. Нативный формат PiTun — сохраняет все поля правил и имена сетов.',
+              'Pick which scopes to export. TEMPEST writes the PiTun-compatible format so existing exports remain importable.',
+              'Выбери области для экспорта. TEMPEST сохраняет совместимый со старым PiTun формат, чтобы прежние экспорты оставались импортируемыми.',
             )}
           </p>
 

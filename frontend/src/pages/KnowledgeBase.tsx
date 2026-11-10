@@ -88,6 +88,11 @@ const SECTIONS: SectionDef[] = [
       en: (
         <>
           <P>
+            <B>Upstream reference.</B> This inherited PiTun guide documents upstream features and
+            installation behavior. TEMPEST is currently in phase 1; its safe development profile
+            disables VPN traffic and host network operations.
+          </P>
+          <P>
             <B>PiTun</B> is a self-hosted transparent proxy manager for Raspberry Pi 4/5.
             It sits on your LAN alongside the router, intercepts traffic from devices that set
             their gateway to the RPi, and routes it through VPN nodes (xray-core) based on
@@ -112,6 +117,11 @@ nftables TPROXY -> xray-core -> routing rules
       ),
       ru: (
         <>
+          <P>
+            <B>Справка upstream.</B> Эта унаследованная инструкция PiTun описывает функции и
+            установку upstream-проекта. TEMPEST находится на этапе 1: безопасный dev-профиль
+            отключает VPN-трафик и операции с сетью хоста.
+          </P>
           <P>
             <B>PiTun</B> — self-hosted менеджер прозрачного прокси для Raspberry Pi 4/5.
             Устанавливается в локальную сеть рядом с роутером, перехватывает трафик устройств,

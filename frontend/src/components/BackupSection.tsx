@@ -43,7 +43,7 @@ export default function BackupSection() {
       const a = document.createElement('a')
       a.href = url
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')
-      a.download = `pitun-backup-${stamp}.json`
+      a.download = `tempest-backup-${stamp}.json`
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) { showError(e) } finally { setBusy(null) }
@@ -170,7 +170,7 @@ export default function BackupSection() {
               </label>
             </div>
             <div className="text-[11px] text-gray-500">
-              {t('From', 'Из')} PiTun {plan.pitun_version ?? '?'} · {plan.exported_at?.slice(0, 16).replace('T', ' ')}
+              {t('From', 'Из')} TEMPEST {plan.pitun_version ?? '?'} · {plan.exported_at?.slice(0, 16).replace('T', ' ')}
             </div>
             <div className="rounded-lg border border-gray-800 overflow-hidden">
               <table className="w-full text-[11px]">

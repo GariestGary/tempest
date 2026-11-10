@@ -296,7 +296,8 @@ async def create_node(data: NodeCreate, session: AsyncSession = Depends(get_sess
 
     # Naive nodes need a dedicated sidecar container + nftables bypass so
     # the sidecar's upstream connection isn't stolen by tproxy.
-    if node.protocol == "naive":
+    from app.config import settings
+    if node.protocol == "naive" and not settings.dev_safe_mode:
         await _ensure_naive_port(node, session)
         await _sync_naive_sidecar(node, enabled=node.enabled)
         if node.enabled:
@@ -338,7 +339,8 @@ async def update_node(node_id: int, data: NodeUpdate, session: AsyncSession = De
     await session.commit()
     await session.refresh(node)
 
-    if node.protocol == "naive":
+    from app.config import settings
+    if node.protocol == "naive" and not settings.dev_safe_mode:
         await _ensure_naive_port(node, session)
         if enabled_changed:
             await _sync_naive_sidecar(node, enabled=node.enabled)
@@ -490,7 +492,8 @@ async def delete_node(
     # (commit first, stop after) leaves a running container with no DB
     # backing — much harder to clean up: it gets restarted by Docker policy
     # and nobody knows to kill it.
-    if was_naive:
+    from app.config import settings
+    if was_naive and not settings.dev_safe_mode:
         from app.core.naive_manager import naive_manager
         try:
             await naive_manager.stop_node(node_id)
@@ -553,11 +556,23 @@ async def delete_node(
 
     await session.commit()
 
-    await _heal_active_node_after_delete(session, {node_id}, background_tasks)
+    if settings.dev_safe_mode:
+        # Keep deletion a database-only operation. Do not consult Xray or
+        # schedule dataplane work in this profile.
+        from app.models import Settings as DBSettings
+        active = (await session.exec(
+            select(DBSettings).where(DBSettings.key == "active_node_id")
+        )).first()
+        if active and active.value == str(node_id):
+            active.value = ""
+            session.add(active)
+            await session.commit()
+    else:
+        await _heal_active_node_after_delete(session, {node_id}, background_tasks)
 
     # Refresh nftables so the deleted naive server's IP drops out of the
     # bypass set — otherwise we'd leave a stale exception.
-    if was_naive:
+    if was_naive and not settings.dev_safe_mode:
         await _refresh_naive_tproxy_bypass(session)
 
 

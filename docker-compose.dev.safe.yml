@@ -1,0 +1,88 @@
+name: tempest-dev-safe
+
+# Isolated local UI/API profile. Do not use this file as a production stack.
+# Docker's bridge/loopback port publication is managed by the Docker daemon;
+# the application containers themselves receive no host network privileges.
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: dev-safe
+    environment:
+      SECRET_KEY: "${TEMPEST_DEV_SECRET_KEY:-local-only-change-me}"
+      DATABASE_URL: sqlite:////app/data/tempest-dev.db
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      DEV_SAFE_MODE: "1"
+      XRAY_BINARY: /bin/false
+      XRAY_CONFIG_PATH: /tmp/tempest/mock-xray-config.json
+      XRAY_LOG_PATH: /tmp/tempest/mock-xray.log
+      DOCKER_HOST: unix:///run/tempest-dev-no-docker.sock
+      HOME: /tmp
+      PYTHONDONTWRITEBYTECODE: "1"
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    volumes:
+      - tempest_dev_db:/app/data
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+      - ./backend/alembic.ini:/app/alembic.ini:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    ports:
+      - "127.0.0.1:${TEMPEST_DEV_API_PORT:-8000}:8000"
+
+  ui:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev.safe
+    environment:
+      VITE_DEV_PROXY_TARGET: http://api:8000
+      VITE_CACHE_DIR: /tmp/vite-cache
+      HOME: /tmp
+      npm_config_cache: /tmp/npm-cache
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    volumes:
+      - ./frontend/src:/app/src:ro
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5173').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    ports:
+      - "127.0.0.1:${TEMPEST_DEV_UI_PORT:-3000}:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  tempest_dev_db:
+    name: ${TEMPEST_DEV_DB_VOLUME:-tempest-dev-safe-db}

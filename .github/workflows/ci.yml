@@ -68,11 +68,7 @@ jobs:
       # React 19 in older lockfiles) without weakening prod resolution.
       - name: Install dependencies (npm ci, locked)
         run: npm ci --legacy-peer-deps --no-audit --no-fund
-      # `npm run lint` is intentionally skipped — there's no ESLint
-      # config tracked in the repo yet (the `lint` script in
-      # package.json invokes eslint without a `.eslintrc.*` /
-      # `eslint.config.js`). When we add one, drop this comment and
-      # re-enable: `- run: npm run lint`.
+      - run: npm run lint
       - run: npm run test:ci
       - run: npm run build
 
@@ -80,3 +76,53 @@ jobs:
       # 10 MB chunks before they ship.
       - name: Report dist size
         run: du -sh dist
+
+  dev-compose-safety:
+    name: Safe dev Compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Render and audit the safe dev profile
+        run: |
+          docker compose -f docker-compose.dev.safe.yml config --format json > "$RUNNER_TEMP/tempest-dev-compose.json"
+          python - "$RUNNER_TEMP/tempest-dev-compose.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as source:
+              config = json.load(source)
+
+          services = config["services"]
+          assert set(services) == {"api", "ui"}
+          for name, service in services.items():
+              assert service.get("privileged") is not True, name
+              assert service.get("network_mode") != "host", name
+              assert service.get("pid") != "host", name
+              assert service.get("cap_drop") == ["ALL"], name
+              assert not service.get("cap_add"), name
+              assert service.get("read_only") is True, name
+              assert service.get("user", "0:0").split(":", 1)[0] != "0", name
+              assert not service.get("devices"), name
+              assert "no-new-privileges:true" in service.get("security_opt", []), name
+              for mount in service.get("volumes", []):
+                  target = mount["target"]
+                  assert "docker.sock" not in str(mount), (name, mount)
+                  allowed_targets = {
+                      "api": {"/app/data", "/app/app", "/app/alembic", "/app/alembic.ini"},
+                      "ui": {"/app/src"},
+                  }[name]
+                  assert target in allowed_targets, (name, target)
+                  if mount["type"] == "bind":
+                      assert mount.get("read_only") is True, (name, mount)
+                  assert "docker.sock" not in target, (name, target)
+              tmpfs = service.get("tmpfs", {})
+              tmpfs_targets = set(tmpfs) if isinstance(tmpfs, dict) else {
+                  entry.split(":", 1)[0] for entry in tmpfs
+              }
+              assert tmpfs_targets <= {"/tmp"}, (name, tmpfs_targets)
+              for port in service.get("ports", []):
+                  assert port.get("host_ip") == "127.0.0.1", (name, port)
+              assert service.get("healthcheck"), name
+
+          assert services["api"]["environment"].get("DEV_SAFE_MODE") == "1"
+          PY

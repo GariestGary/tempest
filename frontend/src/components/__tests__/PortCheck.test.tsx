@@ -59,7 +59,7 @@ describe('<PortCheck>', () => {
   it('explains the selected port, including foreign inbounds', async () => {
     vi.mocked(xuiApi.checkPorts).mockResolvedValue(RESULT)
     render(wrap(<PortCheck serverId={3} selected={443} />))
-    await waitFor(() => expect(screen.getByText(/не из этого PiTun|not managed by this PiTun/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/не из этого TEMPEST|not managed by this TEMPEST/)).toBeInTheDocument())
   })
 
   it('warns when the SSH layer did not run', async () => {

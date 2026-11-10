@@ -37,8 +37,8 @@ export function PanelUpdateCard({ serverId }: { serverId: number }) {
     const ok = await confirm({
       title: t(`Update the panel to ${data.latest}?`, `Обновить панель до ${data.latest}?`),
       body: t(
-        'This is the release PiTun has tested. PiTun copies the panel database on the VPS first (and stops if it cannot). The update then runs the new version\'s database migrations once and cannot be undone: going back means restoring that copy. It also replaces xray with the one bundled in that release. The panel is unavailable for a minute or two.',
-        'Это релиз, проверенный в PiTun. Сначала PiTun копирует базу панели на VPS (без копии обновление не начнётся). Затем обновление один раз выполняет миграции базы новой версии и необратимо: вернуться можно только восстановлением этой копии. Заодно xray заменится на тот, что входит в релиз. Панель будет недоступна минуту-две.',
+        'This is the release TEMPEST has tested. TEMPEST copies the panel database on the VPS first (and stops if it cannot). The update then runs the new version\'s database migrations once and cannot be undone: going back means restoring that copy. It also replaces xray with the one bundled in that release. The panel is unavailable for a minute or two.',
+        'Это релиз, проверенный в TEMPEST. Сначала TEMPEST копирует базу панели на VPS (без копии обновление не начнётся). Затем обновление один раз выполняет миграции базы новой версии и необратимо: вернуться можно только восстановлением этой копии. Заодно xray заменится на тот, что входит в релиз. Панель будет недоступна минуту-две.',
       ),
       confirmLabel: t('Back up and update', 'Скопировать и обновить'),
     })

@@ -10,6 +10,15 @@ export function useSystemStatus() {
   })
 }
 
+export function useDevSafeMode() {
+  return useQuery({
+    queryKey: ['dev', 'safe-mode'],
+    queryFn: () => systemApi.devSafeMode(),
+    staleTime: 60_000,
+    retry: false,
+  })
+}
+
 export function useSystemSettings() {
   return useQuery({
     queryKey: ['system', 'settings'],

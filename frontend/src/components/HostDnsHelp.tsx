@@ -97,8 +97,8 @@ export function HostDnsHelp({ highlight, className }: Props) {
 
           <p className="text-gray-400">
             {t(
-              'Both set DNS for the PiTun box ITSELF (its own lookups: subscriptions, geo files, x-ui panels, health checks). Neither changes what your LAN devices resolve — that is the DNS Rules + Primary upstream above, handled by xray.',
-              'Обе настраивают DNS для самой машины PiTun (её собственные запросы: подписки, гео-файлы, x-ui панели, health-проверки). Ни одна не меняет то, что резолвят твои LAN-устройства — это DNS-правила + Primary upstream выше, через xray.',
+              'Both set DNS for the TEMPEST box ITSELF (its own lookups: subscriptions, geo files, x-ui panels, health checks). Neither changes what your LAN devices resolve — that is the DNS Rules + Primary upstream above, handled by xray.',
+              'Обе настраивают DNS для самой машины TEMPEST (её собственные запросы: подписки, гео-файлы, x-ui панели, health-проверки). Ни одна не меняет то, что резолвят твои LAN-устройства — это DNS-правила + Primary upstream выше, через xray.',
             )}
           </p>
 

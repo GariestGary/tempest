@@ -115,8 +115,8 @@ export function Servers() {
     const ok = await confirm({
       title: t('Delete server?', 'Удалить сервер?'),
       body: t(
-        `"${s.name}" will be removed from PiTun. Linked nodes will lose their server reference but will keep working.`,
-        `"${s.name}" будет удалён из PiTun. Привязанные ноды потеряют ссылку на сервер, но продолжат работать.`,
+        `"${s.name}" will be removed from TEMPEST. Linked nodes will lose their server reference but will keep working.`,
+        `"${s.name}" будет удалён из TEMPEST. Привязанные ноды потеряют ссылку на сервер, но продолжат работать.`,
       ),
       confirmLabel: t('Delete', 'Удалить'),
       danger: true,
@@ -133,7 +133,7 @@ export function Servers() {
         </h1>
         <p className="text-sm text-gray-500 hidden md:block">
           {t(
-            'VPS instances you manage from PiTun — store SSH access + deploy scripts',
+            'VPS instances you manage from TEMPEST — store SSH access + deploy scripts',
             'Ваши VPS — храним доступ по SSH и разворачиваем скрипты установки',
           )}
         </p>
@@ -351,7 +351,7 @@ function ManualScriptsSection({
         />
         {/* x-ui doesn't have a "configure & download .sh" path on
             purpose — the install flow (random fakesite, nginx, certbot,
-            etc.) is too involved to script-and-forget. PiTun's
+            etc.) is too involved to script-and-forget. TEMPEST's
             SSH-driven Deploy on a registered Server handles it
             end-to-end. For users who want to install manually, link
             out to the upstream repos. */}
@@ -379,8 +379,8 @@ function XuiUpstreamCard() {
       </div>
       <p className="text-xs text-gray-400 mb-3 leading-snug flex-1">
         {t(
-          'No "configure & download" here — the install touches nginx, Let\'s Encrypt and a 268 MB fakesite bundle. Use PiTun → Servers → Deploy → "x-ui" on a registered VPS for the supported flow. If you want to install manually, the upstream repos below also work; once running, import a client URI from the panel into PiTun → Nodes.',
-          'Тут нет "настроить и скачать" — установка трогает nginx, Let\'s Encrypt и архив фейк-сайтов на 268 МБ. Через PiTun → Servers → Deploy → "x-ui" на зарегистрированный VPS работает из коробки. Если хочется руками — установите через апстрим-репы ниже, потом импортируйте URI клиента из панели в PiTun → Nodes.',
+          'No "configure & download" here — the install touches nginx, Let\'s Encrypt and a 268 MB fakesite bundle. Use TEMPEST → Servers → Deploy → "x-ui" on a registered VPS for the supported flow. If you want to install manually, the upstream repos below also work; once running, import a client URI from the panel into TEMPEST → Nodes.',
+          'Тут нет "настроить и скачать" — установка трогает nginx, Let\'s Encrypt и архив фейк-сайтов на 268 МБ. Через TEMPEST → Servers → Deploy → "x-ui" на зарегистрированный VPS работает из коробки. Если хочется руками — установите через апстрим-репы ниже, потом импортируйте URI клиента из панели в TEMPEST → Nodes.',
         )}
       </p>
       <div className="flex flex-col gap-1.5 text-xs">
@@ -566,7 +566,7 @@ function ServerRow({
           {/* Per-protocol "Wipe" buttons (since v1.3.0-beta.6) — one
               icon per ServerDeployment that exists. Distinct from the
               row-level Delete (Trash2) below: that drops the Server
-              record from PiTun's DB; this one runs an SSH-driven
+              record from TEMPEST's DB; this one runs an SSH-driven
               uninstall script that wipes the actual VPS state.
               Hidden entirely when no deployment is set up so the
               icon strip stays compact for fresh servers. */}
@@ -1273,8 +1273,8 @@ function ManualScriptModal({ mode, onClose }: { mode: ScriptModalMode; onClose: 
           <FieldL
             label={t('SSH port (optional)', 'SSH-порт (опционально)')}
             hint={t(
-              'leave blank to keep current — applied at install, PiTun remembers it',
-              'оставьте пустым — текущий не трогаем; PiTun запомнит после установки',
+              'leave blank to keep current — applied at install, TEMPEST remembers it',
+              'оставьте пустым — текущий не трогаем; TEMPEST запомнит после установки',
             )}
           >
             <SshPortField
@@ -1349,7 +1349,7 @@ function generateRandomPassword(): string {
   const bytes = new Uint8Array(24)
   crypto.getRandomValues(bytes)
   // base64url: replace + with -, / with _, strip =
-  let b64 = btoa(String.fromCharCode(...bytes))
+  const b64 = btoa(String.fromCharCode(...bytes))
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 

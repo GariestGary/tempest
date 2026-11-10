@@ -141,7 +141,6 @@ function TemplateForm({
     }
     const ua = userAgent.trim()
     if (!ua) return t('User-Agent is required', 'Укажите User-Agent')
-    // eslint-disable-next-line no-control-regex
     if (/[\r\n\0]/.test(ua)) {
       return t(
         'User-Agent must not contain line breaks',
