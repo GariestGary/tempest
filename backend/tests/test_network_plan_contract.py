@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
@@ -17,6 +18,7 @@ from app.network_agent.models import (
     IPCProtocolError,
     NetworkPlan,
     ReadStatusRequest,
+    SetEgressPolicy,
     StageRequest,
     VerifyRequest,
     parse_ipc_request,
@@ -52,6 +54,19 @@ def make_plan(
             destination="0.0.0.0/0",
             egress_id=default_egress_id,
             table_id=1001,
+        ),
+        SetEgressPolicy(
+            kind="set_egress_policy",
+            object={"owner": "tempest", "object_type": "firewall_policy", "object_id": "tempest-ingress-default-block"},
+            traffic_scope="protected_ingress",
+            verdict="block",
+        ),
+        SetEgressPolicy(
+            kind="set_egress_policy",
+            object={"owner": "tempest", "object_type": "firewall_policy", "object_id": "tempest-ingress-allow-primary"},
+            traffic_scope="protected_ingress",
+            verdict="allow",
+            egress_id=default_egress_id,
         ),
     )
     return NetworkPlan(
@@ -159,6 +174,25 @@ def test_plan_rejects_duplicate_owned_objects_and_duplicate_egress_ids() -> None
         make_plan(egress_candidates=(duplicate_candidate, duplicate_candidate))
 
 
+def test_plan_requires_default_block_and_a_route_for_each_allowed_egress() -> None:
+    plan = make_plan()
+    no_default_block = tuple(
+        operation
+        for operation in plan.operations
+        if not (isinstance(operation, SetEgressPolicy) and operation.verdict == "block")
+    )
+    with pytest.raises(ValidationError, match="default block policy"):
+        make_plan(operations=no_default_block)
+
+    no_route_for_allow = tuple(
+        operation
+        for operation in plan.operations
+        if not isinstance(operation, EnsureRoute)
+    )
+    with pytest.raises(ValidationError, match="requires a route"):
+        make_plan(operations=no_route_for_allow)
+
+
 def test_unknown_operation_and_untyped_command_are_rejected() -> None:
     payload = json.loads(make_plan().canonical_json())
     payload["operations"][0] = {
@@ -192,15 +226,10 @@ def test_generation_number_cannot_be_reused_with_different_plan() -> None:
 def test_same_generation_id_cannot_be_replayed_with_modified_content() -> None:
     agent = MockNetworkAgent()
     first = make_plan()
+    first_interface = first.operations[0]
+    assert isinstance(first_interface, EnsureInterface)
     changed = make_plan(
-        operations=(
-            EnsureInterface(
-                kind="ensure_interface",
-                object={"owner": "tempest", "object_type": "interface", "object_id": "tempest-alt"},
-                namespace_id="tempest-ns-dataplane",
-                interface_kind="dummy",
-            ),
-        ),
+        operations=(first_interface.model_copy(update={"interface_kind": "tun"}), *first.operations[1:]),
     )
 
     agent.stage(first)
@@ -215,15 +244,78 @@ def test_apply_is_idempotent_and_confirm_commits_last_known_good() -> None:
 
     applied = agent.apply(plan.generation_id)
     repeated = agent.apply(plan.generation_id)
+    verified = agent.verify(plan.generation_id)
+    repeated_verify = agent.verify(plan.generation_id)
     confirmed = agent.confirm(plan.generation_id)
     repeated_confirm = agent.confirm(plan.generation_id)
 
     assert applied.state == "pending_confirmation"
     assert repeated == applied
+    assert "tempest-ingress-default-block" in applied.owned_object_ids
+    assert repeated_verify == verified
     assert confirmed.active_generation == 1
     assert confirmed.last_known_good_generation == 1
     assert confirmed.state == "idle"
+    assert "tempest-ingress-default-block" in confirmed.owned_object_ids
     assert repeated_confirm == confirmed
+
+
+def test_confirm_before_successful_verify_is_rejected() -> None:
+    agent = MockNetworkAgent()
+    plan = make_plan()
+    agent.stage(plan)
+    agent.apply(plan.generation_id)
+
+    with pytest.raises(PlanConflict, match="must pass Verify"):
+        agent.confirm(plan.generation_id)
+
+    assert agent.read_status().pending_generation_id == plan.generation_id
+
+
+@pytest.mark.parametrize("verification", ["stale", "failed"])
+def test_failed_or_stale_verification_never_authorizes_confirm(verification: str) -> None:
+    agent = MockNetworkAgent()
+    plan = make_plan()
+    agent.stage(plan)
+    agent.apply(plan.generation_id)
+
+    if verification == "stale":
+        with pytest.raises(NetworkAgentError):
+            agent.verify(UUID(int=999))
+    else:
+        # Simulate an integrity mismatch between active state and the pending snapshot.
+        agent._active = replace(agent._active, objects={})
+        with pytest.raises(PlanConflict, match="differs from pending"):
+            agent.verify(plan.generation_id)
+
+    with pytest.raises(PlanConflict, match="must pass Verify"):
+        agent.confirm(plan.generation_id)
+
+
+def test_failed_reverification_revokes_prior_permission() -> None:
+    agent = MockNetworkAgent()
+    plan = make_plan()
+    agent.stage(plan)
+    agent.apply(plan.generation_id)
+    agent.verify(plan.generation_id)
+    agent._active = replace(agent._active, objects={})
+
+    with pytest.raises(PlanConflict, match="differs from pending"):
+        agent.verify(plan.generation_id)
+    with pytest.raises(PlanConflict, match="must pass Verify"):
+        agent.confirm(plan.generation_id)
+
+
+def test_rollback_clears_verification_permission() -> None:
+    agent = MockNetworkAgent()
+    plan = make_plan()
+    agent.stage(plan)
+    agent.apply(plan.generation_id)
+    agent.verify(plan.generation_id)
+    agent.rollback(plan.generation_id, "verification no longer trusted")
+
+    with pytest.raises(NetworkAgentError):
+        agent.confirm(plan.generation_id)
 
 
 def test_parallel_apply_allows_only_one_unconfirmed_generation() -> None:
@@ -253,6 +345,7 @@ def test_confirmation_deadline_restores_last_known_good_fail_closed_state() -> N
     plan = make_plan(confirmation_timeout_seconds=5)
     agent.stage(plan)
     agent.apply(plan.generation_id)
+    agent.verify(plan.generation_id)
 
     now[0] += 6
     status = agent.read_status()
@@ -263,6 +356,8 @@ def test_confirmation_deadline_restores_last_known_good_fail_closed_state() -> N
     assert status.pending_generation_id is None
     assert status.owned_object_ids == ()
     assert "last-known-good restored" in (status.last_error or "")
+    with pytest.raises(NetworkAgentError):
+        agent.confirm(plan.generation_id)
 
 
 def test_explicit_rollback_restores_last_known_good() -> None:
@@ -270,6 +365,7 @@ def test_explicit_rollback_restores_last_known_good() -> None:
     plan = make_plan()
     agent.stage(plan)
     agent.apply(plan.generation_id)
+    agent.verify(plan.generation_id)
 
     status = agent.rollback(plan.generation_id, "contract test")
 
@@ -333,6 +429,20 @@ def test_ipc_apply_verify_confirm_lifecycle() -> None:
     assert staged.ok and applied.ok and verified.ok and confirmed.ok
     assert verified.result is not None and verified.result.state == "pending_confirmation"
     assert confirmed.result is not None and confirmed.result.last_known_good_generation == 1
+
+
+def test_ipc_confirm_before_verify_returns_conflict() -> None:
+    plan = make_plan()
+    agent = MockNetworkAgent()
+    agent.stage(plan)
+    agent.apply(plan.generation_id)
+
+    response = agent.handle_request(
+        ConfirmRequest(method="confirm", request_id=UUID(int=405), generation_id=plan.generation_id).model_dump_json()
+    )
+
+    assert response.ok is False
+    assert response.error is not None and response.error.code == "conflict"
 
 
 def test_unknown_ipc_method_and_oversized_frame_are_rejected() -> None:

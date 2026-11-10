@@ -208,6 +208,17 @@ class NetworkPlan(ContractModel):
             if isinstance(operation, SetEgressPolicy) and operation.verdict == "allow":
                 if operation.egress_id not in permitted:
                     raise ValueError("allow policy references an egress not enabled by the plan")
+                if not any(
+                    isinstance(route, EnsureRoute) and route.egress_id == operation.egress_id
+                    for route in self.operations
+                ):
+                    raise ValueError("allow policy requires a route for the same egress")
+
+        policies = [op for op in self.operations if isinstance(op, SetEgressPolicy)]
+        if not any(policy.verdict == "block" for policy in policies):
+            raise ValueError(
+                "protected_ingress requires a default block policy in every NetworkPlan"
+            )
         return self
 
     def canonical_json(self) -> str:

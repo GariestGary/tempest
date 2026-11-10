@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Mapping
 from uuid import UUID
 
@@ -61,6 +61,7 @@ class _Snapshot:
 class _Pending:
     snapshot: _Snapshot
     deadline_epoch_ms: int
+    verified: bool = False
 
 
 class MockNetworkAgent:
@@ -191,10 +192,13 @@ class MockNetworkAgent:
             self._expire_pending()
             if self._pending is None:
                 if self._active.generation_id == generation_id:
+                    # Confirm is idempotent after this exact generation committed.
                     return self.read_status()
                 raise GenerationNotFound("generation is not awaiting confirmation")
             if self._pending.snapshot.generation_id != generation_id:
                 raise PlanConflict("confirmation generation does not match pending apply")
+            if not self._pending.verified:
+                raise PlanConflict("generation must pass Verify before Confirm")
             self._last_known_good = self._pending.snapshot
             self._active = self._pending.snapshot
             self._pending = None
@@ -209,7 +213,12 @@ class MockNetworkAgent:
             if self._pending is None or self._pending.snapshot.generation_id != generation_id:
                 raise GenerationNotFound("generation is not awaiting verification")
             if self._active != self._pending.snapshot:
+                # A failed re-verification revokes this generation's prior approval.
+                if self._pending.verified:
+                    self._pending = replace(self._pending, verified=False)
                 raise PlanConflict("active snapshot differs from pending generation")
+            if not self._pending.verified:
+                self._pending = replace(self._pending, verified=True)
             return self.read_status()
 
     def rollback(self, generation_id: UUID, reason: str) -> AgentStatus:
