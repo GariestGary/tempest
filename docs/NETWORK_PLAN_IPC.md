@@ -1,6 +1,6 @@
 # NetworkPlan, NetworkAgent и IPC — задача 2.1
 
-**Статус:** design и privilege-free contract/mock для первичной проверки готовы к owner review. Это не принятое архитектурное решение и не реализация сетевого apply. ADR-001 остаётся `PROPOSED`. Этап 1 принят владельцем по [Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`; контракт проверен успешным [Actions run #7](https://github.com/GariestGary/tempest/actions/runs/42806285061) на commit `fac3f083a479af7bc60bb193feb2b44bed622ba9`; в этапе 2 разрешена только задача 2.1.
+**Статус:** design и privilege-free contract/mock для первичной проверки готовы к owner review. Это не принятое архитектурное решение и не реализация сетевого apply. ADR-001 остаётся `PROPOSED`. Этап 1 принят владельцем по [Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`; исправленный контракт проверен полным успешным [CI run #9](https://github.com/GariestGary/tempest/actions/runs/42814005624) и [CodeQL run #9](https://github.com/GariestGary/tempest/actions/runs/42814005724) на commit `cab6221e2b86bd418102c1dfd67aafbe31636d61` (backend 1764 passed / 2 skipped; frontend 142 passed, lint/build pass; safe Compose checks pass); в этапе 2 разрешена только задача 2.1.
 
 ## Граница полномочий
 
