@@ -1,6 +1,6 @@
 # NetworkPlan, NetworkAgent и IPC — задача 2.1
 
-**Статус:** проект и privilege-free contract/mock для первичной проверки. Это не принятое архитектурное решение и не реализация сетевого apply. ADR-001 остаётся `PROPOSED`. Этап 1 принят владельцем по [Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`; в этапе 2 разрешена только задача 2.1.
+**Статус:** design и privilege-free contract/mock для первичной проверки готовы к owner review. Это не принятое архитектурное решение и не реализация сетевого apply. ADR-001 остаётся `PROPOSED`. Этап 1 принят владельцем по [Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`; контракт проверен успешным [Actions run #7](https://github.com/GariestGary/tempest/actions/runs/42806285061) на commit `fac3f083a479af7bc60bb193feb2b44bed622ba9`; в этапе 2 разрешена только задача 2.1.
 
 ## Граница полномочий
 
@@ -96,6 +96,6 @@ A is the first candidate if its required operations and IPC work without host na
 
 ## What is implemented and what remains unverified
 
-- Implemented for this initial slice: immutable v1 models, canonical serialization/fingerprint, strict typed IPC request parsing, mock validate/stage/diff/apply/verify/confirm/rollback/status, generation/CAS/idempotency checks, ownership collision checks, deadline rollback, and contract tests.
+- Implemented for this initial slice: immutable v1 models, canonical serialization/fingerprint, strict typed IPC request parsing, mock validate/stage/diff/apply/verify/confirm/rollback/status, generation/CAS/idempotency checks, ownership collision checks, deadline rollback, and contract tests (included in hosted full backend result: 1757 passed, 2 skipped).
 - Not implemented: real AF_UNIX listener/peer credential enforcement, durable journal, systemd unit, namespace setup, real netlink/nftables/WireGuard/TUN apply, physical connectivity verification, reboot fault recovery, or Linux A/B experiment.
 - ADR-001 is unchanged in status (`PROPOSED`). This document provides task 2.1 design input only; it does not accept Gate 2 or authorize tasks 2.2–2.8.
