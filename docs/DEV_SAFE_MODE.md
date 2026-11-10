@@ -47,13 +47,15 @@ cleanup. В GitHub Actions отчёт прикрепляется как artifact
 ошибке smoke. Для ручного запуска по умолчанию путь отчёта печатается в конце;
 его можно задать через `TEMPEST_SMOKE_REPORT_DIR`.
 
-На TORNADO Docker Engine недоступен, поэтому локальный runtime запуск здесь не
-выполняется. Hosted run #2 нашёл запись стандартного Vite config loader в
-read-only `/app/node_modules/.vite-temp`; runner loader исправил старт UI. Run #3
-затем обнаружил, что `/tmp` приходит через `HostConfig.Tmpfs`, а не обычный
-список `Mounts`; проверка скорректирована и ждёт повторного hosted прогона.
-До успешного полного run и review приложенного отчёта Gate 1 и задача 1.6
-остаются открытыми.
+На TORNADO Docker Engine недоступен, поэтому локальный Compose runtime здесь не
+выполняется; причина — daemon/service не запущен, причина остановки не выяснена,
+системные настройки не менялись. GitHub-hosted Ubuntu run #4 успешно выполнил
+полный runtime smoke, проверил фактические container security properties и
+сохранил network diff/diagnostics в [artifact](https://github.com/GariestGary/tempest/actions/runs/42781710707/artifacts/13746286950).
+Compose bridge/NAT изменения были Docker-managed и удалились при teardown;
+остались только Docker Engine общие следы runner, TEMPEST сетевых мутаций не
+обнаружено. Задача 1.6 проверена; Gate 1 остаётся `READY_FOR_REVIEW` до
+подтверждения приёмки.
 
 После запуска доступны:
 
