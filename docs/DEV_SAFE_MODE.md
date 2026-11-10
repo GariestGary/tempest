@@ -48,8 +48,10 @@ cleanup. В GitHub Actions отчёт прикрепляется как artifact
 его можно задать через `TEMPEST_SMOKE_REPORT_DIR`.
 
 На TORNADO Docker Engine недоступен, поэтому локальный runtime запуск здесь не
-выполняется. GitHub-hosted runtime job настроен, но Gate 1 и задача 1.6 остаются
-открытыми до успешного CI run и review приложенного отчёта.
+выполняется. Hosted run #2 нашёл запись стандартного Vite config loader в
+read-only `/app/node_modules/.vite-temp`; исправление использует runner loader.
+До успешного hosted rerun и review приложенного отчёта Gate 1 и задача 1.6
+остаются открытыми.
 
 После запуска доступны:
 

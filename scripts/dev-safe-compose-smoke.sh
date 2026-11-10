@@ -278,6 +278,7 @@ snapshot_network before
 
 compose build
 compose up -d
+snapshot_network after-up
 
 wait_healthy() {
   local service="$1"
@@ -369,8 +370,6 @@ for binding in bindings[expected_port] or []:
 print(f"{service}: runtime namespace, capability, mount, and port checks passed")
 PY
 done
-
-snapshot_network after-up
 
 SMOKE_USERNAME="${TEMPEST_SMOKE_USERNAME:-admin}"
 SMOKE_PASSWORD="${TEMPEST_SMOKE_PASSWORD:-password}"

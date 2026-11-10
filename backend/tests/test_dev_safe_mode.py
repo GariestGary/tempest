@@ -47,7 +47,7 @@ async def test_safe_lifespan_skips_operational_startup(monkeypatch):
         (chain_drift.chain_drift_scheduler, "start", False),
         (domain_stats.domain_stats_scheduler, "start", False),
         (router_mode, "reconcile_on_boot", True),
-        (router_watchdog.router_watchdog, "recover_on_boot", True),
+        (router_watchdog, "recover_on_boot", True),
         (router_watchdog.router_watchdog, "start", False),
         (naive_supervisor.naive_supervisor, "start", False),
         (naive_manager.naive_manager, "sync_all", True),
@@ -111,7 +111,11 @@ def test_safe_mode_denies_network_and_host_operations(client, monkeypatch):
         ("post", "/api/system/update/start"),
         ("get", "/api/diagnostics/network"),
     ):
-        response = getattr(client, method)(path, json={})
+        response = client.request(
+            method,
+            path,
+            json={} if method not in {"GET", "HEAD", "OPTIONS"} else None,
+        )
         assert response.status_code == 423, (method, path, response.text)
         assert response.json()["dataplane"] == "mock-noop"
 
