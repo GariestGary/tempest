@@ -114,7 +114,11 @@ def test_server_closes_connection_for_unapproved_peer(tmp_path: Path) -> None:
             client.settimeout(1)
             client.connect(str(path))
             client.sendall(struct.pack("!I", len(_request(20))) + _request(20))
-            assert client.recv(1) == b""
+            try:
+                result = client.recv(1)
+            except ConnectionResetError:
+                result = b""
+            assert result == b""
     finally:
         server.shutdown()
         server.server_close()
