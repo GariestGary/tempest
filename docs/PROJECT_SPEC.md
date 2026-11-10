@@ -1,6 +1,6 @@
 # TEMPEST — спецификация продукта и поэтапный план разработки
 
-> **Статус:** направление принято; этап 1 подготовлен к review, см. актуальную сводку в §15.
+> **Статус:** этап 1 принят владельцем по Gate 1; этап 2 в работе, разрешена только задача 2.1. Актуальная сводка — §15.
 > **Дата исходного решения:** 2026-11-10.  
 > **Название продукта:** **TEMPEST** (без «2», «3», «Next» и других версий в имени).  
 > **База:** форк [DaveBugg/PiTun](https://github.com/DaveBugg/PiTun), ветка upstream `master`.  
@@ -16,9 +16,9 @@
 
 **Git workflow TEMPEST:** единственная рабочая ветка — `master`; все изменения выполнять непосредственно в ней. Не создавать feature branches и Pull Requests без отдельного запроса пользователя. GitHub Actions должен запускаться на каждом push в `master`. Коммит или зелёный CI сами по себе не означают приёмку этапа: переход разрешает только пользователь.
 
-**На первом запуске Codex:** разрешён **только этап 0**. Сначала изучить исходный код PiTun и зафиксировать baseline. Не переписывать сразу backend, не создавать VPN-сервер, не менять firewall хоста и не разворачивать сервисы на VORTEX.
+**При первичной работе с ещё не базированным проектом:** разрешён **только этап 0**. Сначала изучить исходный код PiTun и зафиксировать baseline. TEMPEST уже прошёл и принял этапы 0 и 1; действующую авторизацию брать из §15. Не переписывать backend, не менять firewall хоста и не разворачивать сервисы на VORTEX без отдельного разрешённого этапа.
 
-Этап 0 принят пользователем 2026-11-10. Текущая авторизация распространяется только на этап 1; этап 2 остаётся заблокирован.
+Этапы 0 и 1 приняты владельцем. Этап 1 принят по успешному [GitHub Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`. Текущая авторизация распространяется только на задачу 2.1; задачи 2.2–2.8 и все последующие этапы требуют отдельного подтверждения.
 
 Для каждой задачи:
 
@@ -65,7 +65,7 @@
 - **Разработка:** TORNADO, Windows 11, Git + Codex. Для Linux-команд допускается WSL2/контейнерная среда; полноценные сетевые тесты выполнять на отдельной Linux VM/тестовом сервере.
 - **Будущий продуктив:** VORTEX, Ubuntu Server 26.04 LTS, Docker Compose, существующие Caddy/AdGuard/Nextcloud/другие сервисы. TEMPEST обязан сосуществовать с ними.
 - **Первый релиз:** Linux x86_64/amd64. ARM64 — желателен позже после проверки бинарников и тестов.
-- **Схема развёртывания:** один репозиторий и единый `docker compose` для непривилегированных сервисов; **если требуется host-level маршрутизация**, минимальный привилегированный `tempest-agent` запускается отдельно как ограниченный systemd service (см. раздел 5). Не скрывать дополнительный шаг установки агента.
+- **Схема развёртывания:** один репозиторий и единый `docker compose` для непривилегированных Control Plane/engine services; отдельный Network Agent сначала проверяется в выделенном network namespace. Systemd Agent в host namespace остаётся запасным вариантом только для доказанной host-only операции (см. раздел 5); не переносить автоматически модель привилегий production PiTun.
 - **Сеть:** хост за роутером с публично доступным входящим адресом/портами через NAT/port forwarding; возможен LAN gateway mode. Не предполагать, что TEMPEST является основным роутером или DHCP-сервером.
 
 ---
@@ -178,10 +178,13 @@
                               SQLite / settings / audit
                                       │ authenticated local RPC
                                       ▼
-                              tempest-agent (host)
-                     bounded operations: nft/ip/tun/wg
-                                      │
-                            Linux kernel networking
+                    tempest-agent (separate process)
+                              │
+                    preferred test: dedicated netns
+                    reserved fallback: host netns only
+                    for proven host-only operations
+                              │
+                   TEMPEST-owned network objects
 ```
 
 ### 5.1. Control Plane (по умолчанию без привилегий)
@@ -192,19 +195,21 @@
 - Не выполняет произвольные shell-команды, `sudo`, `nsenter` и прямой `nft`/`ip` от имени API.
 - Не публикует панель непосредственно в интернет по умолчанию. В production её отдаёт существующий Caddy с отдельной политикой доступа. Порт внутреннего UI конфигурируемый, дефолт не 80/443 (например, `127.0.0.1:8787` только после проверки занятости).
 
-### 5.2. Tempest Agent (минимально необходимые права)
+### 5.2. Network Agent (минимально необходимые права)
 
-**Ответ на вопрос «нужен ли широкий контроль над хостом?» — нет, широкие полномочия не обязательны.** Но при настройке kernel WireGuard, policy routing, TUN и nftables **нужны ограниченные привилегии в сетевом namespace, который меняем**. В общем случае полностью избавиться от прав на изменение сети хоста нельзя.
+FastAPI/React/SQLite Control Plane остаётся отдельным непривилегированным компонентом. Он не получает Linux capabilities, host PID/network, Docker socket или системные mounts и не вызывает `nft`, `ip`, `nsenter`, `sudo` либо произвольный shell для изменения сети.
 
-Требования:
+Основной кандидат — Network Agent и dataplane в заранее созданном выделенном Linux network namespace. Сначала проверить, достаточно ли полномочий внутри этого namespace для конкретных операций. **Systemd Agent в host network namespace — запасной вариант**, только если эксперимент выявит необходимую host-only операцию и её нельзя выполнить через выделенный namespace. Это кандидаты для испытаний, не принятое архитектурное решение; ADR-001 остаётся `PROPOSED` до Linux VM испытаний.
 
-- Выделенный **host-level systemd service** с Unix-socket (или иной обоснованно безопасный локальный IPC). Только локальные вызовы; Unix socket доступен строго нужному процессу, возможна проверка `SO_PEERCRED`.
-- API агента **типизированный и allowlist-only**, например: `validate_plan`, `stage_plan`, `apply_owned_rules`, `restore_snapshot`, `create_owned_tun`, `manage_owned_wg_peer`, `check_engine`, `read_owned_status`. Никакого `exec(command: string)` и произвольных путей к файлам.
-- Доступные привилегии выбирать **по экспериментальной проверке**: `CAP_NET_ADMIN` для сетевых изменений; `CAP_NET_RAW`, `CAP_NET_BIND_SERVICE` — только если реально нужны конкретному процессу. Разделить привилегии агента и пользовательских probe/engine сервисов. Не обещать, что все операции возможны без root; если требуется root, ограничить службой, sandboxing и списком операций. Документировать каждую capability и зачем она необходима.
-- Agent владеет **только** объектами `tempest_*`: nftables table/chain/set, ip rule fwmark/table, интерфейсами с именами/ID TEMPEST, локальными конфигами. Никогда `nft flush ruleset`, глобальная смена default route или массовое удаление чужих правил.
-- При отказе агента Control Plane остаётся доступен для чтения/диагностики. У agent/engine отдельные health checks и журнал.
-- Запрещён прямой доступ Web/API к Docker socket. Удалить/изолировать PiTun-операции массового управления Docker и host networking, а не просто убрать флаг `privileged` и надеяться на работоспособность.
-- При невозможности на первом этапе сделать безопасный host-agent — временный **proxy-only mode**, не меняющий маршруты хоста. Привилегированное развёртывание откладывается до безопасной реализации.
+Требования к границе:
+
+- Agent — отдельный процесс/lifecycle с минимальным UID и полномочиями. `CAP_NET_ADMIN` — только кандидат для собственного сетевого namespace; `CAP_NET_RAW`, `CAP_NET_BIND_SERVICE` и доступ к `/dev/net/tun` не выдаются без проверенного требования. Agent не получает `CAP_SYS_ADMIN`. Загрузка модулей и создание/переключение namespace остаются setup/preflight задачами.
+- Между Control Plane и Agent — локальный Unix socket с типизированными запросами `validate`, `stage`, `diff`, `apply`, `confirm`, `rollback`, `read_status`. Сообщение само по себе не аутентифицирует вызывающего: Agent проверяет kernel peer credentials (`SO_PEERCRED`), владельца socket path, allowlist UID/GID и привязку к разрешённому сервису/cgroup. Actor для audit выводится из проверенных transport credentials, а не принимается из JSON.
+- IPC ограничивает размер frame, timeout и частоту запросов, использует protocol version, request ID, generation ID и строгую JSON schema с отказом от неизвестных полей/операций. Сериализация не использует pickle. От повторного/конкурирующего apply защищают монотонная generation, fingerprint, base generation и transaction lock.
+- `NetworkPlan` задаёт полное декларативное состояние только объектов TEMPEST в указанном namespace. Операции типизированы; в контракте нет `exec(command: string)`, nft text, произвольных путей/environment или параметров systemd/SSH.
+- Stage не меняет активную сеть. Apply допустим только после валидации плана с хотя бы одним разрешённым egress; без допустимого egress защищённый поток остаётся закрытым. Каждая pending generation имеет срок подтверждения и last-known-good; timeout, потеря IPC или reboot до подтверждения восстанавливают последнюю подтверждённую generation, а при неудаче восстановления сохраняют блокировку защищённого трафика.
+- Реестр ownership, pending transaction и last-known-good не доступны на запись Control Plane. Чужие firewall/route/interface objects не меняются. Из области Agent исключены host default route, системный resolver, глобальный firewall flush, Docker API и автоматическое наследование привилегий PiTun.
+- Если безопасная граница Agent не доказана, остаётся proxy-only/dev mock без сетевых изменений. Схемы и Linux-only A/B эксперимент: [NetworkPlan / IPC](NETWORK_PLAN_IPC.md).
 
 ### 5.3. Data Plane
 
@@ -388,7 +393,7 @@
 
 | Окружение | Назначение | Сетевая политика |
 |---|---|---|
-| **dev / TORNADO** | Codex, Python/Node tests, сборка, mock Agent | Без реального изменения Windows/Linux firewall |
+| **dev / TORNADO** | Codex, Python/Node tests, сборка, privilege-free mock Agent | Без реального изменения Windows/Linux firewall |
 | **integration / Linux VM** | nftables, WireGuard, TUN, маршрутизация, negative tests | Выделенный изолированный namespace/VM, snapshot, консольный доступ |
 | **staging** | Близкая к production сборка со своими портами/интерфейсами | Не пересекается с TEMPEST 2 и рабочими сервисами |
 | **production / VORTEX** | Финальный сервис | Только после всех gate, backup, ручного cutover и плана возврата |
@@ -489,17 +494,17 @@ class IngressAdapter(Protocol):
 
 ## 15. Пошаговый план реализации и отслеживание прогресса
 
-**Текущий этап: `1 — Dev/test infrastructure и безопасный запуск`.**
-**Общий статус: `READY_FOR_REVIEW` (этап 1 не принят; runtime Compose smoke остаётся непроверенным).**
-**Правило:** следующая фаза остаётся `BLOCKED`, пока текущая не `ACCEPTED` пользователем. Можно отмечать галочки внутри активной фазы, но нельзя начинать следующую.
+**Текущий этап: `2 — Безопасная граница привилегий и NetworkPlan`.**
+**Общий статус: `IN_PROGRESS` (этап 1 принят владельцем; задача 2.1 передаётся на review отдельно).**
+**Правило:** выполняется только задача 2.1. Задачи 2.2–2.8 и этап 3 заблокированы до отдельного подтверждения. Gate 2 и этап 2 не приняты.
 
 ### Сводка фаз
 
 | Этап | Название | Статус | Результат / gate |
 |---:|---|---|---|
 | 0 | Форк, аудит и исходный baseline | **ACCEPTED** | [Baseline и проверки](UPSTREAM_BASELINE.md), [риски](HOST_PRIVILEGE_AUDIT.md), [gap matrix](TEMPEST_GAP_MATRIX.md), [ADR-001](adr/ADR-001-privilege-separation.md) |
-| 1 | Воспроизводимая dev/test-среда и safe mode | **READY_FOR_REVIEW** | [Dev-safe профиль](DEV_SAFE_MODE.md); Docker Engine runtime smoke ещё не выполнен |
-| 2 | Privilege separation и безопасный NetworkPlan | BLOCKED | API лишён host-привилегий, agent меняет только свои объекты с rollback |
+| 1 | Воспроизводимая dev/test-среда и safe mode | **ACCEPTED** | Владелец принял по [Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356` |
+| 2 | Privilege separation и безопасный NetworkPlan | **IN_PROGRESS** | Разрешена только задача 2.1; Gate 2 не принят |
 | 3 | Сущности Provider/Endpoint/Group и архитектура adapters | BLOCKED | Динамическая модель и совместимость с PiTun узлами |
 | 4 | Egress WG/AWG/VLESS (и DIRECT) | BLOCKED | Рабочие исходящие методы проверены end-to-end |
 | 5 | Policy Engine, DNS и fail-closed routing | BLOCKED | Ручное правило управляет тестовым потоком без утечек |
@@ -538,16 +543,16 @@ class IngressAdapter(Protocol):
 - [x] 1.3. Подготовить и статически проверить `docker compose` для dev **без host networking/privileged/docker.sock**; UI и API на loopback-портах.
 - [x] 1.4. Реализовать явно помеченный no-op dataplane на текущем dispatch seam; UI/API доступны, network mutations закрыты. NetworkAgent/IPC остаются вне этапа 1.
 - [x] 1.5. CI: backend/frontend tests, build/typecheck и lint; локально проверить safe-mode deny boundary и Compose security options.
-- [x] 1.6. Smoke test: чистый clone → конфигурация env → запуск → healthchecks → login → DB-only CRUD → deny network operations → restart → clean teardown. Полный hosted run #4 прошёл; runtime inspect и network diff сохранены в sanitized [artifact](https://github.com/GariestGary/tempest/actions/runs/42781710707/artifacts/13746286950).
+- [x] 1.6. Smoke test: чистый clone → конфигурация env → запуск → healthchecks → login → DB-only CRUD → deny network operations → restart → clean teardown. Полный hosted run #5 прошёл; reviewed runtime inspect и network diff run #4 сохранены в sanitized [artifact](https://github.com/GariestGary/tempest/actions/runs/42781710707/artifacts/13746286950).
 - [x] 1.7. Документировать занятые порты, volume paths, команды start/stop/reset и очистку dev-данных.
 
-**Gate 1:** dev-safe UI/API и backend без host privileges, runtime security, deny boundary, CRUD/restart/teardown и network before/up/teardown diff проверены hosted run #4; все Actions jobs зелёные. Дифф показывает ожидаемые Docker-managed bridge/NAT изменения, удалённые Compose bridge/veth/port rules после teardown и только общие runner Docker residuals (`docker0` IPv6 link-local, пустая `ip raw` table, счётчики). DNS/default route/`ip rule` unchanged; прямых TEMPEST network mutations не обнаружено. Сводка и sanitised diagnostics: [Actions run #4](https://github.com/GariestGary/tempest/actions/runs/42781710707), [artifact](https://github.com/GariestGary/tempest/actions/runs/42781710707/artifacts/13746286950). Gate 1 в `READY_FOR_REVIEW`; этап не принят до подтверждения пользователя. Docker Engine на TORNADO остаётся недоступен, причина остановки сервиса не установлена безопасной диагностикой.
+**Gate 1: ACCEPTED владельцем.** Dev-safe UI/API, backend без host privileges, runtime security, deny boundary, CRUD/restart/teardown и network before/up/teardown diff прошли hosted run #5. Подробный reviewed network diff и sanitised diagnostics доступны в [run #4 artifact](https://github.com/GariestGary/tempest/actions/runs/42781710707/artifacts/13746286950); [run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332) успешно завершил все jobs на commit `38fec1220c250b3b398e9160842e301d92d9d356`, что владелец принял. Дифф отделяет Docker-managed bridge/NAT от сетевых изменений TEMPEST; прямых TEMPEST network mutations не выявлено. Docker Engine на TORNADO остаётся недоступен; он не требовался для принятой hosted проверки.
 
-### ЭТАП 2 — Безопасная граница привилегий и операции с сетью
+### ЭТАП 2 — Безопасная граница привилегий и операции с сетью (`IN_PROGRESS`; разрешена только задача 2.1)
 
 **Цель:** отказаться от широкого доступа PiTun Control Plane к хосту, сохранив возможность **управлять своими** маршрутами.
 
-- [ ] 2.1. Определить и протестировать интерфейс `NetworkPlan` + `NetworkAgent` + local Unix IPC, явные запросы, аудит, авторизация вызывающего процесса.
+- [ ] 2.1. Спроектировать и первоначально проверить versioned `NetworkPlan`, типизированные операции, serialization/validators, privilege-free mock `NetworkAgent` и typed local Unix IPC contract; описать peer authentication/audit и Linux-only A/B experiment. Не реализовывать kernel networking apply до архитектурных испытаний. Задача передаётся на review отдельно; production Unix socket и реальные namespace/auth tests остаются экспериментом.
 - [ ] 2.2. Выделить host-agent как отдельный systemd service; задать Linux sandboxing/capabilities на основе реально используемых операций, а не наугад.
 - [ ] 2.3. Перенести все необходимые network mutations из API и PiTun manager'ов в agent; нерелевантные router/WiFi/DHCP/SSH-deploy фичи отключить за feature flags.
 - [ ] 2.4. Удалить у API доступ к host docker.sock, `privileged`, `pid: host`, host network, host sysctl и общесистемным конфигам. Для firewall агента не давать shell endpoint.
@@ -674,7 +679,9 @@ class IngressAdapter(Protocol):
 
 ---
 
-## 16. Первая сессия на TORNADO: инструкция для Codex
+## 16. Первая сессия на TORNADO: инструкция для Codex (историческая)
+
+Эта инструкция описывает уже принятую фазу 0 и сохранена для истории. Текущую авторизацию и статусы брать только из §15; prompt ниже не является текущим заданием.
 
 ### 16.1. Однократная подготовка GitHub
 
@@ -715,7 +722,7 @@ git rev-parse HEAD
 
 | Дата | Этап | Изменения/результаты | Тесты | Commit | Блокеры | Кто принял |
 |---|---|---|---|---|---|---|
-| 2026-11-10 | 1 | Workflow uses `master` directly, no feature branches/PR absent separate request. Hosted CI runs on each push. After fixing Vite read-only config loading and tmpfs inspection, run #4 passed all jobs and full runtime smoke. Task 1.6 verified; Gate 1 remains `READY_FOR_REVIEW`, phase not accepted. | Backend 1736 passed / 2 skipped; frontend 142 passed, lint/build pass; safe Compose runtime passed build/up/health/login/DB-only CRUD/denials/restart/teardown. Security report and network diff reviewed: Docker-managed bridge/NAT create/remove, only runner Docker residuals, no direct TEMPEST mutation. Sanitized [artifact](https://github.com/GariestGary/tempest/actions/runs/42781710707/artifacts/13746286950). | `b80eda27723c2446914afc603fd4e605c9bbfa19` (`fix: inspect safe compose tmpfs correctly`). | TORNADO Docker Engine stopped; reason beyond daemon unavailability is unknown and was not changed. Gate 1 awaits user review/acceptance. | — |
+| 2026-11-10 | 1 | Workflow uses `master` directly, no feature branches/PR absent separate request. Hosted CI runs on each push. Run #4 passed all jobs and runtime smoke; owner accepted Gate 1 based on successful [run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332) at `38fec1220c250b3b398e9160842e301d92d9d356`. | Backend 1736 passed / 2 skipped; frontend 142 passed, lint/build pass; safe Compose runtime passed build/up/health/login/DB-only CRUD/denials/restart/teardown. Security report and network diff reviewed: Docker-managed bridge/NAT create/remove, only runner Docker residuals, no direct TEMPEST mutation. Sanitized [artifact](https://github.com/GariestGary/tempest/actions/runs/42781710707/artifacts/13746286950). | `38fec1220c250b3b398e9160842e301d92d9d356` (Gate 1 evidence/acceptance baseline). | TORNADO Docker Engine stopped; cause beyond daemon unavailability unknown and not changed. This did not block hosted Gate 1. | Владелец, по run #5 |
 | 2026-11-10 | 1 | Закрыта 1.1: UI/API metadata/dev package и документация переименованы в TEMPEST; PiTun license/provenance, legacy storage keys и export formats сохранены. Добавлены broad safe-mode API/WebSocket/lifecycle regression tests и [воспроизводимый Linux VM smoke](../scripts/dev-safe-compose-smoke.sh). | Frontend: 142 passed; build/typecheck и lint pass. `docker compose config --quiet` и static Compose security audit pass; Bash `-n` и backend `py_compile` pass. Backend pytest этого изменения не запускался: доступный Python 3.12 без FastAPI/SQLModel/pytest, pip cache без зависимостей; предыдущий прогон 301 passed / 1 skipped / 1 deselected + 7 safe-mode тестов относится к прежнему состоянию. | Реализация этапа 1: `b6f6d55e41fc185e1b85a937b803d02923a08879` (`feat: implement TEMPEST phase 1 safe dev profile`, branch `codex/phase-1-safe-dev`). | Docker CLI 29.1.2 есть, но daemon pipe отсутствует; `com.docker.service` остановлена (Manual), процессов Docker нет. `WslService` работает, но WSL inventory и Docker config недоступны (`E_ACCESSDENIED` / `Access denied`). Не выполнены runtime container inspect и сетевой diff в Linux VM; системные настройки не менялись. | — |
 | 2026-11-10 | 0 | Пользователь подтвердил приёмку этапа 0; этап 1 авторизован. | Результаты этапа 0 см. следующую запись. | — | ADR-001 остаётся PROPOSED. | Пользователь |
 | 2026-11-10 | 0 | Сверены форк и лицензия. Зафиксированы [карта кода и тесты](UPSTREAM_BASELINE.md), [операции на хосте](HOST_PRIVILEGE_AUDIT.md), [разрывы](TEMPEST_GAP_MATRIX.md) и [проект ADR-001](adr/ADR-001-privilege-separation.md). [Итог для владельца](STATUS.md) | Pytest 294 passed / 1 skipped / 1 deselected. Vitest 142 passed, TypeScript/Vite build успешен. ESLint: нет конфигурации | Upstream `b75223d621395e7b641a77bcff61cd8647deb207`. SHA аудита через `git log -1 -- docs/UPSTREAM_BASELINE.md` | Требуется подтверждение владельца. Проверка runtime, утечек и rollback отнесена на Linux VM в следующих этапах | — |
@@ -723,7 +730,7 @@ git rev-parse HEAD
 
 ### Открытые архитектурные вопросы (не заполнять догадками)
 
-- [ ] Уточнить в этапах 2/4: достаточна ли сегрегация `tempest-agent` через systemd/capabilities на Ubuntu 26.04 или часть dataplane лучше держать в выделенном network namespace? Подтвердить ADR-001 только после Linux VM tests.
+- [ ] Этап 2: проверить основной кандидат — Agent в отдельном network namespace; рассматривать ограниченный host-netns systemd Agent только если A/B Linux VM experiment подтвердит конкретную host-only необходимость. ADR-001 остаётся PROPOSED до испытаний и review.
 - [ ] Уточнить на этапе 2: какие конкретно операции PiTun применяет к **host namespace**, что из этого нужно нашему gateway.
 - [ ] Уточнить на этапе 3/4: стратегию выбора Xray vs sing-box для VLESS/HY2; какие версии поддерживаются и какие требуют отдельного бинарника.
 - [ ] Уточнить на этапе 4: AWG поддерживаемые версии/режимы и Linux runtime на целевом железе.

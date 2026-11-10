@@ -5,7 +5,7 @@
 ## Current instructions
 
 - Product name: **TEMPEST** (no version suffix). Fork base: `DaveBugg/PiTun` (`master`, BSD-3-Clause).
-- **Current phase: PHASE 1 (`READY_FOR_REVIEW`). PHASE 0 was accepted by the user on 2026-11-10.** Continue only phase 1 until review/acceptance; do not begin phase 2 without explicit approval.
+- **Phase 1: `ACCEPTED` by the owner on 2026-11-10**, based on successful GitHub Actions [run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332) at commit `38fec1220c250b3b398e9160842e301d92d9d356`. **Current phase: PHASE 2 (`IN_PROGRESS`), task 2.1 only.** Do not start tasks 2.2–2.8 or phase 3 without separate confirmation; do not mark phase 2 accepted before its Gate 2 and owner review.
 - **Git workflow:** `master` is the only working branch. Make changes directly on `master`; do not create feature branches or Pull Requests unless the user asks for them separately.
 - Reuse PiTun architecture/tests and preserve upstream history/license. Do not rewrite the backend in .NET.
 - **No automatic geo-content unblocking detection.** Geo-specific routing is user-managed via explicit rules. AUTO is limited to transport-level health/failover within approved candidates.
@@ -24,6 +24,6 @@
 5. Report changed files, commands/tests, pass/fail, risks, unverified scenarios, and commit SHA.
 6. Stop and ask for approval before moving to the next phase.
 
-## Accepted phase 0 baseline
+## Accepted phase 0/1 baselines
 
-The baseline SHA, host-operation audit, feature gap matrix, test commands, and proposed ADR-001 are recorded in `docs/`. Phase 0 is accepted. Current authorized work is phase 1 only; do **not** start feature implementation beyond its dev/test scope, deploy on VORTEX, or move to phase 2 without explicit user approval.
+The baseline SHA, host-operation audit, feature gap matrix, and proposed ADR-001 are recorded in `docs/`. Phase 0 and phase 1 are accepted. Gate 1 evidence is recorded in `docs/STATUS.md` and the Actions run above. Current authorization is limited to task 2.1: design and initial contract/mock checks for NetworkPlan, NetworkAgent, and IPC. Do **not** implement real nftables/WireGuard apply, start tasks 2.2–2.8, deploy on VORTEX, or move beyond task 2.1 without separate user confirmation. ADR-001 remains `PROPOSED` until the Linux architecture experiments are reviewed.
