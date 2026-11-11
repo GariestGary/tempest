@@ -17,6 +17,18 @@ from app.network_agent.service import AgentServer, PeerPolicy
 from tests.test_network_plan_contract import make_plan
 
 
+@pytest.fixture
+def agent_mode(monkeypatch):
+    """Set the safe profile before TestClient enters the application lifespan."""
+    monkeypatch.setattr(settings, "dev_safe_mode", False)
+    monkeypatch.setattr(settings, "control_plane_mode", "agent")
+
+
+@pytest.fixture
+def agent_client(agent_mode, client):
+    return client
+
+
 def test_legacy_feature_flags_default_off():
     assert settings.legacy_router_enabled is False
     assert settings.legacy_wifi_dhcp_enabled is False
@@ -24,14 +36,12 @@ def test_legacy_feature_flags_default_off():
     assert settings.legacy_docker_sidecars_enabled is False
 
 
-def test_agent_mode_blocks_every_unmigrated_api_and_websocket(client, monkeypatch):
+def test_agent_mode_blocks_every_unmigrated_api_and_websocket(agent_client, monkeypatch):
     from app.core.dev_safe_mode import agent_mode_request_is_allowed
     from app.main import app
     from starlette.routing import WebSocketRoute
     from starlette.websockets import WebSocketDisconnect
 
-    monkeypatch.setattr(settings, "dev_safe_mode", False)
-    monkeypatch.setattr(settings, "control_plane_mode", "agent")
     # Even explicit legacy flags must not turn an unmigrated API into a bypass.
     for flag in (
         "legacy_router_enabled", "legacy_wifi_dhcp_enabled",
@@ -49,16 +59,17 @@ def test_agent_mode_blocks_every_unmigrated_api_and_websocket(client, monkeypatc
         for method in methods:
             if agent_mode_request_is_allowed(method, path):
                 continue
-            response = client.request(method, path)
+            response = agent_client.request(method, path)
             assert response.status_code == 501, (method, path_template, response.text)
-            assert response.json()["code"] == "NETWORK_PLAN_OPERATION_UNSUPPORTED"
+            if method != "HEAD":
+                assert response.json()["code"] == "NETWORK_PLAN_OPERATION_UNSUPPORTED"
             blocked += 1
     assert blocked >= 30
 
     for route in app.routes:
         if isinstance(route, WebSocketRoute):
             with pytest.raises(WebSocketDisconnect) as closed:
-                with client.websocket_connect(route.path):
+                with agent_client.websocket_connect(route.path):
                     pass
             assert closed.value.code == 1008
 
@@ -122,17 +133,15 @@ async def test_typed_client_refuses_mock_apply_and_missing_socket(tmp_path):
         await client.validate(plan)
 
 
-def test_plan_api_has_auth_and_fails_when_agent_absent(client, auth_headers, monkeypatch, tmp_path):
+def test_plan_api_has_auth_and_fails_when_agent_absent(agent_client, auth_headers, monkeypatch, tmp_path):
     from app.api import network_plan
 
-    monkeypatch.setattr(settings, "dev_safe_mode", False)
-    monkeypatch.setattr(settings, "control_plane_mode", "agent")
     monkeypatch.setattr(network_plan.network_agent_client, "_socket_path", str(tmp_path / "absent.sock"))
     plan = make_plan().model_dump(mode="json")
-    assert client.post("/api/network-plan/validate", json=plan).status_code == 401
-    response = client.post("/api/network-plan/validate", json=plan, headers=auth_headers)
+    assert agent_client.post("/api/network-plan/validate", json=plan).status_code == 401
+    response = agent_client.post("/api/network-plan/validate", json=plan, headers=auth_headers)
     assert response.status_code == 503
-    assert client.post("/api/network-plan/validate", json={**plan, "command": "id"}, headers=auth_headers).status_code == 422
+    assert agent_client.post("/api/network-plan/validate", json={**plan, "command": "id"}, headers=auth_headers).status_code == 422
 
 
 @pytest.mark.asyncio
