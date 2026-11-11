@@ -12,7 +12,7 @@
 
 ## 2026-11-10 · этап 1
 
-**ACCEPTED владельцем** по успешному [GitHub Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`. Run #5 завершил все jobs успешно, включая backend/frontend/static Compose и hosted Linux runtime smoke Gate 1. Этап 2 имеет статус `IN_PROGRESS`; задача 2.1 принята владельцем, выполняется только задача 2.2.
+**ACCEPTED владельцем** по успешному [GitHub Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`. Run #5 завершил все jobs успешно, включая backend/frontend/static Compose и hosted Linux runtime smoke Gate 1. Актуальный статус этапа 2 приведён ниже.
 
 - Добавлен отдельный `docker-compose.dev.safe.yml`: непривилегированные UID, read-only root filesystems, `cap_drop: ALL`, loopback-only port mappings, отдельный DB volume; без host network/PID, Docker socket и системных host mounts. `docker compose config` и статический аудит параметров прошли.
 - `DEV_SAFE_MODE=1` останавливает штатный lifecycle после локальной SQLite и defaults. Ревью проверило все зарегистрированные HTTP routes/WebSocket deny boundary, lifecycle startup hooks/background tasks, dataplane guards и закрытые backup restore/network/system operations. Исправленные regression tests прошли: backend run #4 дал 1736 passed, 2 skipped.
@@ -38,7 +38,9 @@
 
 ADR-001 и выбор netns остаются открытыми; реальные nftables/WG правила не запускались.
 
-## 2026-11-10 · этап 2, задача 2.2 — READY_FOR_REVIEW
+## 2026-11-10 · этап 2, задача 2.2 — ACCEPTED
+
+Владелец принял задачу 2.2 после проверки commit `91fb2c63a5204b1a16fb960a718108aae5e4d3e9` и успешного GitHub CI. Этап 2 остаётся `IN_PROGRESS`, Gate 2 не принят. Текущая авторизация — только задача 2.3.
 
 Добавлены самостоятельный `python -m app.network_agent` AF_UNIX listener и systemd unit. Транспорт использует 4-byte length-prefixed framing (64 KiB maximum), read/write timeout, `SO_PEERCRED` UID/GID allowlist, optional cgroup match, сериализованную обработку клиентов и bounded 4096-ID process-local replay guard с fail-closed при заполнении. Действия логируются с kernel peer IDs без тел запросов. Состояние остаётся in-memory mock; все сетевые операции — no-op. `Confirm` заново проверяет целостность pending snapshot и не продвигает повреждённый candidate в last-known-good.
 
@@ -46,4 +48,10 @@ ADR-001 и выбор netns остаются открытыми; реальны�
 
 Linux CI на ephemeral Ubuntu 24.04 runner проверил AF_UNIX connect/deny через реальные `SO_PEERCRED`, UID/GID allowlist, kernel identity в log, JSON identity spoof rejection, framing/oversize, timeout, lost response/retry, replay, конкурирующих клиентов, standalone lifecycle и systemd sandbox declarations. CI не запускал systemd unit, не менял capabilities/network namespaces и не применял сетевые операции. Локальный Python недоступен на TORNADO из-за отказа Microsoft Store runtime.
 
-Не проверены на выделенной Linux VM: effective capability masks работающего systemd unit, реальное взаимодействие `NetworkNamespacePath`, user-namespace/cgroup mapping production контейнера, runtime systemd sandbox enforcement и A/B namespace/host-netns experiments. Их нельзя выводить из статических unit assertions. Unit не устанавливался на TORNADO/VORTEX; сетевое состояние пользовательских машин не менялось. Durable replay journal/process-restart recovery, nftables/WireGuard/TUN, routing и задачи 2.3–2.8 не входят в этот срез; ADR-001 остаётся `PROPOSED`, Gate 2 и весь этап 2 не приняты.
+Не проверены на выделенной Linux VM: effective capability masks работающего systemd unit, реальное взаимодействие `NetworkNamespacePath`, user-namespace/cgroup mapping production контейнера, runtime systemd sandbox enforcement и A/B namespace/host-netns experiments. Их нельзя выводить из статических unit assertions. Unit не устанавливался на TORNADO/VORTEX; сетевое состояние пользовательских машин не менялось. Durable replay journal/process-restart recovery, nftables/WireGuard/TUN и routing не входят в этот срез; ADR-001 остаётся `PROPOSED`, Gate 2 и весь этап 2 не приняты.
+
+## 2026-11-11 · этап 2, задача 2.3 — IN_PROGRESS
+
+Разрешена только задача 2.3. [Карта миграции](TASK_2_3_CALL_MAP.md) фиксирует сетевые вызовы API, менеджеров, startup/shutdown и scheduler, делит их на необходимые, legacy и опасные. Первый срез вводит явно включаемый `CONTROL_PLANE_MODE=agent`: типизированные AF_UNIX вызовы `NetworkPlan` validate/diff/status; остальной API, WebSocket, operational startup/shutdown и dataplane apply закрыты явным отказом. Legacy PiTun профиль сохранён как текущая совместимость; dev-safe Compose не менялся. Реальный apply не реализован, задача 2.3 **не завершена**.
+
+Риски Agent остаются открытыми: ограниченный process-local replay cache, отсутствие durable recovery, непроверенный runtime systemd unit и UID/cgroup mapping. На TYPHOON не устанавливался Agent и не менялись сеть, DNS, маршруты, firewall или VPN. Локальный Python 3.14 не имеет зависимостей проекта; установка через `uv` не удалась из-за DNS к PyPI. Статическая компиляция и `git diff --check` прошли; итог CI и SHA фиксируются после push.

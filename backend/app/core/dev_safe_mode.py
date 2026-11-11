@@ -69,6 +69,31 @@ def request_is_allowed(method: str, path: str) -> bool:
     )
 
 
+def agent_mode_request_is_allowed(method: str, path: str) -> bool:
+    """Small reviewed surface while legacy operational paths are unmigrated."""
+    return (method, path) in {
+        ("GET", "/health"),
+        ("POST", "/api/auth/login"),
+        ("GET", "/api/auth/me"),
+        ("POST", "/api/network-plan/validate"),
+        ("POST", "/api/network-plan/diff"),
+        ("GET", "/api/network-plan/status"),
+    }
+
+
+def _legacy_feature_flag(path: str) -> str | None:
+    """Classify old PiTun surfaces without granting them Agent privileges."""
+    if path.startswith("/api/network/router-mode") or path.startswith("/api/system/router"):
+        return "legacy_router_enabled"
+    if path.startswith("/api/network/wifi") or path.startswith("/api/network/dhcp"):
+        return "legacy_wifi_dhcp_enabled"
+    if path.startswith(("/api/servers", "/api/server-clients", "/api/server-tasks", "/api/scripts", "/api/xui")):
+        return "legacy_ssh_deploy_enabled"
+    if path.startswith("/api/resources") or "/naive/" in path:
+        return "legacy_docker_sidecars_enabled"
+    return None
+
+
 class DevSafeModeMiddleware:
     """Apply the safe-mode allowlist to HTTP and reject all WebSockets."""
 
@@ -76,7 +101,8 @@ class DevSafeModeMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if not settings.dev_safe_mode:
+        agent_mode = settings.control_plane_mode == "agent" and not settings.dev_safe_mode
+        if not settings.dev_safe_mode and not agent_mode:
             await self.app(scope, receive, send)
             return
 
@@ -94,15 +120,31 @@ class DevSafeModeMiddleware:
 
         path = scope.get("path", "")
         method = scope.get("method", "GET").upper()
-        if not request_is_allowed(method, path):
+        allowed = (
+            agent_mode_request_is_allowed(method, path)
+            if agent_mode else request_is_allowed(method, path)
+        )
+        if not allowed:
+            feature_flag = _legacy_feature_flag(path) if agent_mode else None
+            detail = (
+                (
+                    f"{feature_flag} is disabled in Agent Control Plane mode."
+                    if feature_flag and not getattr(settings, feature_flag)
+                    else "Legacy operation requires a typed NetworkPlan migration before Agent mode can use it."
+                )
+                if agent_mode else SAFE_MODE_DETAIL
+            )
             response = JSONResponse(
-                status_code=423,
+                status_code=501 if agent_mode else 423,
                 content={
-                    "detail": SAFE_MODE_DETAIL,
-                    "code": "DEV_SAFE_MODE_NETWORK_OPERATION_DISABLED",
-                    "dataplane": "mock-noop",
+                    "detail": detail,
+                    "code": (
+                        "NETWORK_PLAN_OPERATION_UNSUPPORTED" if agent_mode
+                        else "DEV_SAFE_MODE_NETWORK_OPERATION_DISABLED"
+                    ),
+                    "dataplane": "agent-unavailable" if agent_mode else "mock-noop",
                 },
-                headers={"X-TEMPEST-Dataplane": "mock-noop"},
+                headers={"X-TEMPEST-Dataplane": "agent-unavailable" if agent_mode else "mock-noop"},
             )
             await response(scope, receive, send)
             return
@@ -110,7 +152,7 @@ class DevSafeModeMiddleware:
         async def add_mode_header(message):
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
-                headers.append((b"x-tempest-dataplane", b"mock-noop"))
+                headers.append((b"x-tempest-dataplane", b"agent-unavailable" if agent_mode else b"mock-noop"))
                 message["headers"] = headers
             await send(message)
 

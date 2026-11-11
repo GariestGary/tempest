@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Literal
 
 # Single source of truth for the backend version. Surfaced in the FastAPI
 # OpenAPI metadata, `/health` response, and `/system/status` so the
@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     # Explicit opt-in for the local, non-networking development profile.
     # Production behaviour remains unchanged unless DEV_SAFE_MODE is set.
     dev_safe_mode: bool = False
+    # Opt-in migration profile. Legacy remains the default until task 2.3
+    # has moved every operational path and its compatibility tests pass.
+    control_plane_mode: Literal["legacy", "agent"] = "legacy"
+    network_agent_socket: str = "/run/tempest-agent/control.sock"
+    legacy_router_enabled: bool = False
+    legacy_wifi_dhcp_enabled: bool = False
+    legacy_ssh_deploy_enabled: bool = False
+    legacy_docker_sidecars_enabled: bool = False
 
     # Database
     database_url: str = "sqlite:///./data/pitun.db"

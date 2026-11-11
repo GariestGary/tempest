@@ -66,6 +66,13 @@ async def apply_dataplane(action: Action = "reload") -> None:
     xray first so its inbounds are live, nftables second so the redirects
     point at a listening port.
     """
+    from app.config import settings
+    from app.network_agent.client import NetworkApplyUnsupported
+
+    if settings.control_plane_mode == "agent" and not is_dev_safe_mode():
+        raise NetworkApplyUnsupported(
+            "PiTun dataplane action requires a typed NetworkPlan and real Agent apply"
+        )
     if is_dev_safe_mode():
         logger.warning(
             "Ignored dataplane action %s because TEMPEST development safe mode is active",
@@ -128,6 +135,13 @@ async def dispatch_dataplane(
     background_tasks: Optional[BackgroundTasks], action: Action = "reload",
 ) -> None:
     """Apply now, or after the response when `background_tasks` is given."""
+    from app.config import settings
+    from app.network_agent.client import NetworkApplyUnsupported
+
+    if settings.control_plane_mode == "agent" and not is_dev_safe_mode():
+        raise NetworkApplyUnsupported(
+            "PiTun dataplane action requires a typed NetworkPlan and real Agent apply"
+        )
     if is_dev_safe_mode():
         logger.info(
             "Dataplane action %s recorded as no-op in TEMPEST development safe mode",

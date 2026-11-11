@@ -1,0 +1,30 @@
+# Задача 2.3 — карта миграции сетевых вызовов (2026-11-11)
+
+Статический аудит текущего `master` до первой части 2.3. Обозначения: **N** — понадобится TEMPEST после отдельного проектирования `NetworkPlan`; **L** — legacy/не нужен для MVP; **H** — опасное изменение хоста, не входящее в контракт Agent v1. Вызов может иметь несколько категорий. Эта карта не утверждает, что runtime уже изолирован или что все вызовы перенесены.
+
+| Вход из Control Plane | Исполнитель / эффект | Группа | Следующий шаг |
+|---|---|---|---|
+| `api/system.py` start/stop/restart/reload/settings, `core/dataplane.py` и мутации `api/nodes.py`, `routing.py`, `routing_sets.py`, `devices.py`, `dns.py`, `subscriptions.py`, `nodecircle.py`, `balancers.py`, `backup.py` | `core/xray.py` пишет конфиг/запускает Xray; `api/system._apply_nftables` → `core/nftables.py` вызывает `nft`, `ip rule`, `ip route`; kill switch и flush могут снять защиту. Отдельные прямые reload/flush есть в `api/subscriptions.py`, `backup.py`, `system.py`, `core/xray.py`, `healthcheck.py`, `circle_scheduler.py`, `geo_scheduler.py`. | N,H | Сначала переводить каждый direct caller на общий план; не воспроизводить глобальный PiTun OUTPUT/flush. Xray lifecycle нуждается в отдельной границе engine, а kernel network intents — в Agent. |
+| `api/system.py` start/restart при ручном TUN; `core/xray.py` stop | `core/tun.py`: `ip tuntap`, адрес, MTU, link up/delete фиксированного `tun0`. Auto-route Xray тоже может менять сеть. | N,H | Только уникальный owned TUN в целевом netns после проверки engine и `/dev/net/tun`; сейчас отказ. |
+| `api/network.py` host state/apply/rollback/probe/backups | `core/network_config.py:host_run` (`nsenter`, fallback в namespace процесса); `core/network_apply.py`: ifupdown/NM/networkd файлы, default route, системный DNS, resolved restart, удаление backups. | L,H | Не переносить в v1 `NetworkPlan`; API закрыт в Agent mode. |
+| `api/system.py` boot/settings и `api/dns.py` | Host `/proc/sys` IPv6, `/host/resolv.conf`, fallback DNS через `core/network_apply.py`; Xray DNS и локальные DNS listeners — отдельные. | H; клиентский DNS N | Отказ от host toggles; проектировать только ingress-scoped DNS/IPv6 policy. |
+| `api/system.py` router settings; `api/network.py` router endpoints; `core/router_watchdog.py` и boot reconcile | `core/router_mode.py`, `wan.py`, `wifi.py`, `dhcp.py`: `ip_forward`, nft NAT/forward/input, NM WAN/bridge, hostapd и dnsmasq Docker sidecars. Watchdog teardown при deadline. | L,H; узкий owned forward/NAT позже N | Полный router/Wi-Fi/DHCP выключен в Agent mode, включая boot/watchdog; оставить legacy код ради совместимости до отдельной миграции. |
+| `api/nodes.py`, `api/resources.py`, startup; `core/naive_supervisor.py` | `core/naive_manager.py`, `dhcp.py`, `wifi.py`, `resource_limits.py`: Docker API create/start/stop/remove/update, events, sidecar host networking. | L,H | Sidecars и Docker lifecycle закрыты. Agent contract никогда не получает Docker API. |
+| `api/servers.py`, `server_clients.py`, `scripts.py`, `xui.py`, `server_tasks.py`; `core/jobs.py` | `core/deploy.py`, `ssh.py`, x-ui HTTP/SSH: удалённый root/sudo deploy, WG/iptables/systemd, порт SSH, panel clients, firewall; фоновые jobs могут продолжить после HTTP. | L,H | Remote deploy/job API и workers закрыты в Agent mode; не расширять NetworkPlan до SSH/shell. |
+| `core/healthcheck.py`, `autocheck_scheduler.py`, `circle_scheduler.py`, `chain_drift.py`, `sub_scheduler.py`, `geo_scheduler.py`, `device_scanner.py`, `metrics_collector.py` | DNS/TCP/UDP/ARP/raw probes, `SO_MARK` bypass, temp Xray, подписки/Geo download, rotation и reload/flush, LAN scan, Docker/resource reads. | Диагностика N; остальное L/H | В Agent mode schedulers не стартуют. При переносе отделить read-only transport probes от изменений dataplane; ни один tick не должен применять legacy путь. |
+| `main.py` lifespan startup/shutdown | Start всех schedulers, router recovery/reconcile, host toggles, naive sync, auto-start Xray; shutdown останавливает Xray и может удалить TUN. | N,L,H | В Agent mode только DB init; никаких operational hooks и shutdown mutation. |
+| `api/system.py` update/start; `core/updater.py` и host update script | Shared request file инициирует installer/systemd/Compose обновление вне Agent. | L,H | Отдельный операторский update workflow; не включать в network IPC. |
+
+## Первая проверяемая часть
+
+`CONTROL_PLANE_MODE=agent` — **явно включаемый** профиль миграции. `DEV_SAFE_MODE=1` имеет приоритет и сохраняет прежний dev-safe Compose/no-op контракт. Новый профиль допускает только health/auth и авторизованные `NetworkPlan` validate/diff/status через типизированный AF_UNIX клиент. Остальные HTTP/WS пути получают `501 NETWORK_PLAN_OPERATION_UNSUPPORTED`; dataplane dispatch и `_apply_nftables` отказывают до прямого вызова. Никакого успешного apply через mock Agent нет. Флаги `LEGACY_ROUTER_ENABLED`, `LEGACY_WIFI_DHCP_ENABLED`, `LEGACY_SSH_DEPLOY_ENABLED`, `LEGACY_DOCKER_SIDECARS_ENABLED` по умолчанию выключены; даже их включение не открывает заблокированные endpoints в Agent mode, пока реализации не перенесены.
+
+Это предохранительная граница первой части, а не законченная миграция. По умолчанию остаётся legacy поведение PiTun ради текущей совместимости; такой профиль небезопасен для установки на хост без дальнейших работ. В Agent mode VPN трафик пока **недоступен**. Следующий срез 2.3 должен формировать реальные планы из DB, вынести все необходимые вызовы и устранить прямые обходы внутри менеджеров/фоновых задач. Перед любым реальным apply нужны отдельные задачи 2.5/2.6 и VM проверки.
+
+## Открытые риски Agent
+
+- Replay cache содержит не более 4096 request IDs только в памяти процесса; при заполнении отказывает новым ID, после рестарта теряет историю.
+- Нет durable pending/LKG recovery после crash/reboot. Успех mock Apply не означает изменение сети.
+- Systemd unit проверен статически, но runtime sandbox/capability masks и `NetworkNamespacePath` не испытаны.
+- UID/GID/cgroup и PID mapping из контейнера к systemd Agent не проверен на целевой Linux VM.
+- ADR-001 остаётся `PROPOSED`; netns/nftables/WG/IPv4/IPv6/DNS tests не проводились.

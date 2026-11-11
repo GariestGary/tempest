@@ -59,15 +59,13 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(create_db_and_tables)
     await init_default_settings()
 
-    if settings.dev_safe_mode:
+    if settings.dev_safe_mode or settings.control_plane_mode == "agent":
         # Keep the API and database available for local UI work, but do not
         # import/start any scheduler, Xray, router reconcile, sysctl, DNS,
         # sidecar, or dataplane lifecycle code on this startup path.
-        logger.warning(
-            "TEMPEST DEV SAFE MODE: dataplane is a no-op; VPN traffic is not provided"
-        )
+        logger.warning("TEMPEST safe Control Plane: operational startup disabled; VPN traffic unavailable")
         yield
-        logger.info("TEMPEST development safe mode shutting down")
+        logger.info("TEMPEST safe Control Plane shutting down")
         return
 
     from app.core.xray import xray_manager
@@ -411,7 +409,7 @@ app.add_middleware(
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-from app.api import domain_stats as domain_stats_api, resources as resources_api, nodes, routing, routing_sets, subscriptions, system, geodata, logs, dns, balancers, auth, nodecircle, devices, diagnostics, events, servers, scripts, server_tasks, server_clients, templates, user_agents, xui, network, autocheck, backup
+from app.api import domain_stats as domain_stats_api, resources as resources_api, nodes, routing, routing_sets, subscriptions, system, geodata, logs, dns, balancers, auth, nodecircle, devices, diagnostics, events, servers, scripts, server_tasks, server_clients, templates, user_agents, xui, network, network_plan, autocheck, backup
 from app.core.auth import get_current_user
 
 app.include_router(auth.router, prefix="/api")
@@ -452,6 +450,7 @@ app.include_router(server_clients.router, prefix="/api", dependencies=_auth)
 app.include_router(xui.router, prefix="/api", dependencies=_auth)
 # Host network configuration UI (since v1.3.3) — auth-gated.
 app.include_router(network.router, prefix="/api", dependencies=_auth)
+app.include_router(network_plan.router, prefix="/api", dependencies=_auth)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -475,6 +474,18 @@ async def health():
                 "status": "ok",
                 "dev_safe_mode": True,
                 "dataplane": "mock-noop",
+                "vpn_traffic_available": False,
+                "version": APP_VERSION,
+            },
+        )
+
+    if settings.control_plane_mode == "agent":
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "ok",
+                "control_plane_mode": "agent",
+                "dataplane": "agent-unavailable",
                 "vpn_traffic_available": False,
                 "version": APP_VERSION,
             },

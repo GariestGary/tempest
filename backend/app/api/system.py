@@ -421,6 +421,12 @@ async def _apply_nftables(session: AsyncSession, settings_map: dict) -> str:
     """Apply nftables rules with device filtering. Returns inbound_mode."""
     from app.config import settings as app_settings
 
+    if app_settings.control_plane_mode == "agent" and not app_settings.dev_safe_mode:
+        from app.network_agent.client import NetworkApplyUnsupported
+        raise NetworkApplyUnsupported(
+            "PiTun nftables rules cannot be applied by the Control Plane"
+        )
+
     if app_settings.dev_safe_mode:
         logger.info("Ignored nftables apply in development safe mode")
         return settings_map.get("inbound_mode", "tproxy")
