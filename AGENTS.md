@@ -24,6 +24,17 @@
 5. Report changed files, commands/tests, pass/fail, risks, unverified scenarios, and commit SHA.
 6. Stop and ask for approval before moving to the next phase.
 
+## Local development checks
+
+- Run relevant local tests first after each code change; do not wait for GitHub Actions between local iterations.
+- Reuse `backend/.venv` (managed with `uv`) and `frontend/node_modules`; do not reinstall dependencies on every iteration.
+- Run frontend checks with Node.js 20 to match CI; the current TYPHOON Node.js 26 runtime causes jsdom localStorage test failures.
+- Run the full local suite before finishing a substantial task or phase. Use `scripts/local-check.sh quick|backend|frontend|full` as documented in [docs/LOCAL_DEV.md](docs/LOCAL_DEV.md).
+- GitHub Actions remains an independent check after an authorized push to `master`. A published commit with failed CI blocks further publication until the failure is understood and fixed.
+- Do not disable checks to make the workflow faster. Local checks never install dependencies or require `sudo`.
+- Docker runtime smoke and real network integration tests may run only in a pre-approved isolated Linux VM/test host. Do not run privileged Network Agent or network integration tests on TYPHOON.
+- Stop and consult the owner before risky system changes, privileged operations, system service changes, or changes outside the workspace.
+
 ## Accepted phase 0/1 baselines
 
 The baseline SHA, host-operation audit, feature gap matrix, and proposed ADR-001 are recorded in `docs/`. Phase 0 and phase 1 are accepted. Gate 1 evidence is recorded in `docs/STATUS.md` and the Actions run above. Task 2.1 was accepted after review of `be061d953c52e25da8338d545d117fdbb1d9da24` and successful CI run #10. The owner accepted task 2.2 after reviewing `91fb2c63a5204b1a16fb960a718108aae5e4d3e9` and successful CI. Task 2.3 is authorized and in progress; do **not** start tasks 2.4–2.8, implement real nftables/WireGuard apply, deploy on VORTEX, or move beyond task 2.3 without separate user confirmation. ADR-001 remains `PROPOSED` until Linux architecture experiments are reviewed.
