@@ -5,6 +5,7 @@ comparison is lifted out of the file itself and evaluated, rather than a copy
 of it being retyped here. A test that agrees with a paraphrase of the code
 would have passed while the shipped comparison was wrong.
 """
+import os
 import re
 import shutil
 import subprocess

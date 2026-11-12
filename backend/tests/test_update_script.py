@@ -4,6 +4,7 @@ The script is sourceable (`main` runs only when executed directly), so we
 can call its functions in isolation with stubbed `curl`/`docker` on PATH.
 Skipped where bash is unavailable.
 """
+import os
 import shutil
 import subprocess
 import textwrap
