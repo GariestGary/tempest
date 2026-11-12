@@ -1,0 +1,5 @@
+[
+  {"type": "local", "dst": "127.0.0.0/8", "dev": "lo", "table": "local", "protocol": "kernel", "scope": "host", "prefsrc": "127.0.0.1"},
+  {"dst": "10.42.0.0/24", "dev": "tempest-wg0", "protocol": "static", "scope": "link", "table": 100, "metric": 20},
+  {"dst": "default", "gateway": "192.0.2.1", "dev": "eth0", "table": "main", "metric": 100}
+]

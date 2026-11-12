@@ -26,7 +26,7 @@ class InventoryError(RegistryConflict):
 
 @dataclass(frozen=True)
 class NamespaceIdentity:
-    """Values read by a future trusted collector, never from NetworkPlan."""
+    """Prepared target identity, never supplied by NetworkPlan."""
 
     name: str
     boot_id: str
@@ -95,7 +95,7 @@ def _observed(kind: ObjectKind, namespace: NamespaceIdentity, key: object, claim
 
 
 _LINK_FIELDS = {"ifindex", "ifname", "flags", "mtu", "qdisc", "operstate", "linkmode", "group", "txqlen", "link_type", "address", "broadcast", "linkinfo", "master", "link", "link_index", "link_netnsid", "promiscuity", "min_mtu", "max_mtu", "num_tx_queues", "num_rx_queues", "gso_max_size", "gso_max_segs", "gro_max_size"}
-_RULE_FIELDS = {"priority", "pref", "family", "src", "dst", "from", "to", "fwmark", "fwmask", "table", "action", "protocol", "iif", "oif", "tos", "dsfield", "uidrange", "ipproto", "sport", "dport", "tun_id", "l3mdev", "suppress_prefixlength", "suppress_ifgroup", "goto", "realms", "invert"}
+_RULE_FIELDS = {"priority", "pref", "family", "src", "dst", "srclen", "dstlen", "from", "to", "fwmark", "fwmask", "table", "action", "protocol", "iif", "oif", "tos", "dsfield", "uidrange", "ipproto", "sport", "dport", "tun_id", "l3mdev", "suppress_prefixlength", "suppress_ifgroup", "goto", "realms", "invert"}
 _ROUTE_FIELDS = {"dst", "src", "prefsrc", "table", "gateway", "dev", "protocol", "scope", "type", "metric", "priority", "tos", "pref", "flags", "family", "expires", "mtu", "advmss", "rtt", "rttvar", "window", "cwnd", "ssthresh", "rto_min", "initcwnd", "initrwnd", "quickack", "congctl", "ttl_propagate", "features"}
 _NFT_FAMILIES = {"ip", "ip6", "inet", "arp", "bridge", "netdev"}
 
@@ -134,6 +134,27 @@ def _family(row: dict, feed: str) -> str:
     if value is not None and value != inferred:
         raise InventoryError(f"contradictory {feed} family")
     return inferred
+
+
+def bind_ip_family(raw: str, family: str, feed: str) -> str:
+    """Bind a feed to the collector's explicit ip -4/-6 command context.
+
+    Bare `ip -j rule` default rules often say only `src: all`; their family
+    cannot be inferred from the JSON record. This function is only for the
+    fixed-family command output, not arbitrary imported fixtures.
+    """
+    if family not in {"inet", "inet6"} or feed not in {"rule", "route"}:
+        raise InventoryError("invalid ip command context")
+    rows = _decode(raw, feed)
+    if not isinstance(rows, list):
+        raise InventoryError(f"incomplete {feed} feed")
+    for row in rows:
+        if not isinstance(row, dict):
+            raise InventoryError(f"invalid {feed} record")
+        if "family" in row and row["family"] != family:
+            raise InventoryError(f"contradictory {feed} family")
+        row["family"] = family
+    return _canonical(rows)
 
 
 def _table(value: object, feed: str) -> int:
@@ -207,6 +228,16 @@ def parse_linux_inventory(*, links_json: str, rules_json: str, routes_json: str,
         if "table" not in row and row.get("action", "to_tbl") == "to_tbl":
             raise InventoryError("rule lookup table missing")
         selectors = {k: row[k] for k in sorted(_RULE_FIELDS - {"priority", "pref", "family", "fwmark", "fwmask", "table"}) if k in row}
+        for address, length in (("src", "srclen"), ("dst", "dstlen")):
+            if length in selectors:
+                bits = 32 if family == "inet" else 128
+                prefix_length = _number(selectors.pop(length), length)
+                if address not in selectors or prefix_length > bits:
+                    raise InventoryError(f"invalid rule {length}")
+                address_value = selectors[address]
+                if address_value in ("all", "default") or "/" in _string(address_value, address):
+                    raise InventoryError(f"ambiguous rule {length}")
+                selectors[address] = f"{address_value}/{prefix_length}"
         for key in ("src", "dst", "from", "to"):
             if key in selectors:
                 selectors[key] = _prefix(selectors[key], family, "rule")
@@ -220,8 +251,18 @@ def parse_linux_inventory(*, links_json: str, rules_json: str, routes_json: str,
     for item in routes:
         row = _record(item, _ROUTE_FIELDS, {"dst"}, "route")
         family = _family(row, "route")
-        if "dev" in row and row["dev"] not in link_names:
+        if "dev" in row and _string(row["dev"], "route dev") not in link_names:
             raise InventoryError("route references absent interface")
+        if row.get("type", "unicast") == "unicast" and not ({"dev", "gateway"} & row.keys()):
+            raise InventoryError("unicast route has no next hop")
+        for address in ("gateway", "prefsrc"):
+            if address in row:
+                try:
+                    version = ipaddress.ip_address(_string(row[address], f"route {address}")).version
+                except ValueError as exc:
+                    raise InventoryError(f"invalid route {address}") from exc
+                if version != (4 if family == "inet" else 6):
+                    raise InventoryError(f"contradictory route {address} family")
         table = _table(row.get("table", "main"), "route")
         destination = _prefix(row["dst"], family, "route")
         source = _prefix(row["src"], family, "route source") if "src" in row else None
@@ -235,11 +276,15 @@ def parse_linux_inventory(*, links_json: str, rules_json: str, routes_json: str,
     seen_nft: set[tuple] = set()
     nft_tables: set[tuple[str, str]] = set()
     nft_chains: set[tuple[str, str, str]] = set()
+    metainfo_seen = False
     for item in nft["nftables"]:
         if not isinstance(item, dict) or len(item) != 1:
             raise InventoryError("unsupported nft record")
         entity, value = next(iter(item.items()))
         if entity == "metainfo":
+            if metainfo_seen:
+                raise InventoryError("duplicate nft metainfo")
+            metainfo_seen = True
             _record(value, {"json_schema_version", "version", "release_name"}, {"json_schema_version"}, "nft metainfo")
             if value["json_schema_version"] != 1:
                 raise InventoryError("unsupported nft JSON schema")

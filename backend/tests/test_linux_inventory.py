@@ -1,15 +1,18 @@
-"""Fixture-only Linux inventory checks; safe on Windows without privileges."""
+"""Fixture and mocked collector checks; safe on Windows without privileges."""
 
 import json
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 from app.network_agent.linux_inventory import (
-    InventoryError, NamespaceIdentity, compare_agent_receipts, parse_linux_inventory,
+    InventoryError, NamespaceIdentity, bind_ip_family, compare_agent_receipts, parse_linux_inventory,
     reject_unproven_desired,
 )
+from app.network_agent import linux_inventory_capture as collector
 from app.network_agent.registry import (
     ClaimKind, NetworkObject, ObjectKind, RegistryConflict, ResourceClaim,
 )
@@ -265,4 +268,145 @@ def test_duplicate_json_field_fails_closed():
     data = feeds()
     data["link_json"] = '[{"ifindex":1,"ifindex":2,"ifname":"lo"}]'
     with pytest.raises(InventoryError, match="duplicate JSON"):
+        snapshot(data)
+
+
+def test_command_family_binds_addressless_system_rules_without_ownership():
+    rule4 = bind_ip_family((FIXTURES / "rule4.json").read_text(), "inet", "rule")
+    rule6 = bind_ip_family((FIXTURES / "rule6.json").read_text(), "inet6", "rule")
+    route4 = bind_ip_family((FIXTURES / "route4.json").read_text(), "inet", "route")
+    route6 = bind_ip_family((FIXTURES / "route6.json").read_text(), "inet6", "route")
+    result = parse_linux_inventory(
+        links_json=feeds()["link_json"],
+        rules_json=json.dumps(json.loads(rule4) + json.loads(rule6)),
+        routes_json=json.dumps(json.loads(route4) + json.loads(route6)),
+        nft_json=feeds()["nft_json"], namespace=NAMESPACE,
+    )
+    assert result.complete and len(result.objects) == 17
+    assert all(obj.proof is None for obj in result.objects)
+    rules = [json.loads(obj.kernel_key) for obj in result.objects if obj.kind == ObjectKind.IP_RULE]
+    assert ("inet", 32767) in {(rule[0], rule[1]) for rule in rules}
+    assert ("inet6", 0) in {(rule[0], rule[1]) for rule in rules}
+    assert [rule[2]["src"] for rule in rules if rule[1] == 100] == ["10.42.0.0/24"]
+
+
+@pytest.mark.parametrize("raw,family", [
+    ('[{"family":"inet6","src":"all","priority":0,"table":"local"}]', "inet"),
+    ('[{"src":"all","priority":0,"table":"local","table":"main"}]', "inet"),
+])
+def test_command_family_rejects_contradictions_and_duplicate_keys(raw, family):
+    with pytest.raises(InventoryError):
+        bind_ip_family(raw, family, "rule")
+
+
+def _mock_capture(monkeypatch, *, bad_name=None, returncode=0, stderr=b"", change_identity=False):
+    monkeypatch.setattr(collector, "sys", SimpleNamespace(platform="linux"))
+    checks = []
+
+    def check(expected):
+        checks.append(expected)
+        if change_identity and len(checks) == 4:
+            raise InventoryError("target namespace identity changed")
+
+    monkeypatch.setattr(collector, "_check_identity", check)
+    monkeypatch.setattr(collector, "_binary", lambda name: f"/usr/bin/{name}")
+    raw = {name: (FIXTURES / f"{name}.json").read_bytes()
+           for name in ("rule4", "rule6", "route4", "route6")}
+    raw["link"] = (FIXTURES / "link.json").read_bytes()
+    raw["nft"] = (FIXTURES / "nft.json").read_bytes()
+    called = []
+
+    def run(argv, **kwargs):
+        name = collector._COMMANDS[len(called)][0]
+        called.append(tuple(argv))
+        assert kwargs["shell"] is False and kwargs["stdin"] == subprocess.DEVNULL
+        assert kwargs["timeout"] == 10
+        return subprocess.CompletedProcess(argv, returncode if name == bad_name else 0,
+                                           raw[name], stderr if name == bad_name else b"")
+
+    monkeypatch.setattr(collector.subprocess, "run", run)
+    return called, checks
+
+
+def test_collector_fixed_commands_and_no_automatic_proof(monkeypatch, tmp_path):
+    called, checks = _mock_capture(monkeypatch)
+    result = collector.capture_linux_inventory(NAMESPACE)
+    assert [argv[1:] for argv in called] == [tuple(command[2:]) for command in collector._COMMANDS]
+    assert len(checks) >= 2 * len(called) + 2
+    assert all(obj.proof is None for obj in result.snapshot.objects)
+    destination = tmp_path / "capture"
+    collector.write_capture(result, destination)
+    manifest = json.loads((destination / "manifest.json").read_text())
+    assert manifest["atomic"] is False and manifest["ownership_proof"] is False
+    assert len(manifest["feeds"]) == 6
+
+
+@pytest.mark.parametrize("bad_name,returncode,stderr", [
+    ("rule6", 1, b""), ("route4", 0, b"warning"),
+])
+def test_collector_rejects_command_errors(monkeypatch, bad_name, returncode, stderr):
+    called, _ = _mock_capture(monkeypatch, bad_name=bad_name, returncode=returncode, stderr=stderr)
+    with pytest.raises(InventoryError, match="error or incomplete"):
+        collector.capture_linux_inventory(NAMESPACE)
+    assert len(called) < 6
+
+
+def test_collector_rejects_namespace_change_mid_capture(monkeypatch):
+    called, _ = _mock_capture(monkeypatch, change_identity=True)
+    with pytest.raises(InventoryError, match="identity changed"):
+        collector.capture_linux_inventory(NAMESPACE)
+    assert len(called) == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("gateway", "2001:db8::1"), ("prefsrc", "2001:db8::2"), ("dev", []),
+])
+def test_route_contradiction_or_bad_link_reference_fails_closed(field, value):
+    data = feeds()
+    routes = json.loads(data["route_json"])
+    routes[1][field] = value
+    data["route_json"] = json.dumps(routes)
+    with pytest.raises(InventoryError):
+        snapshot(data)
+
+
+def test_collector_rejects_preflight_namespace_mismatch(monkeypatch):
+    monkeypatch.setattr(collector, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(collector, "_current_identity", lambda name: NamespaceIdentity(
+        name, NAMESPACE.boot_id, NAMESPACE.netns_device, NAMESPACE.netns_inode + 1))
+    with pytest.raises(InventoryError, match="identity changed"):
+        collector.capture_linux_inventory(NAMESPACE)
+
+
+def test_collector_rejects_host_namespace(monkeypatch):
+    monkeypatch.setattr(collector, "_current_identity", lambda name: NAMESPACE)
+    monkeypatch.setattr(collector, "Path", lambda path: SimpleNamespace(
+        stat=lambda: SimpleNamespace(st_dev=NAMESPACE.netns_device,
+                                     st_ino=NAMESPACE.netns_inode)))
+    with pytest.raises(InventoryError, match="host namespace"):
+        collector._check_identity(NAMESPACE)
+
+
+@pytest.mark.parametrize("error", [OSError("no binary"), subprocess.TimeoutExpired("ip", 10)])
+def test_collector_rejects_process_failure(monkeypatch, error):
+    called, _ = _mock_capture(monkeypatch)
+    monkeypatch.setattr(collector.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+    with pytest.raises(InventoryError, match="capture failed"):
+        collector.capture_linux_inventory(NAMESPACE)
+    assert not called
+
+
+def test_incomplete_unicast_route_and_duplicate_nft_metainfo_fail_closed():
+    data = feeds()
+    routes = json.loads(data["route_json"])
+    routes[1].pop("dev")
+    routes[1].pop("gateway")
+    data["route_json"] = json.dumps(routes)
+    with pytest.raises(InventoryError, match="no next hop"):
+        snapshot(data)
+    data = feeds()
+    nft = json.loads(data["nft_json"])
+    nft["nftables"].insert(1, nft["nftables"][0])
+    data["nft_json"] = json.dumps(nft)
+    with pytest.raises(InventoryError, match="duplicate nft metainfo"):
         snapshot(data)

@@ -1,0 +1,4 @@
+[
+  {"type": "local", "dst": "::1", "dev": "lo", "table": "local", "protocol": "kernel", "scope": "host"},
+  {"dst": "2001:db8:42::/64", "dev": "eth0", "protocol": "kernel", "scope": "link", "table": "main"}
+]
