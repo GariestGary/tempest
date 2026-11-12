@@ -2,6 +2,8 @@
 
 ## 2026-11-12 · этап 2, задача 2.4 — READY_FOR_REVIEW
 
+Кодовый коммит: `526ac938d09f1ade4a7804b4f3237235662568dc`.
+
 Добавлена отдельная Agent Compose конфигурация с non-root UID, `cap_drop: ALL`, read-only root filesystem, отсутствием privileged/host network/host PID/devices/Docker socket и системных host mounts; backend image получил непривилегированный `agent` target. Штатный `docker-compose.yml` явно задаёт `CONTROL_PLANE_MODE=legacy`, чтобы `.env` не включал Agent mode. Static audit проверяет Compose/Dockerfile ограничения и отказ неподдержанного IPC transport. Agent и Compose runtime не запускались.
 
 Обновлены `AGENTS.md`, `AUTOPILOT_POLICY.md`, `LOCAL_DEV.md` и local-check scripts: по умолчанию targeted pytest с `-x`; полный backend запуск необязателен, максимум один раз, hard timeout 15 минут; прерванный прогон фиксируется как `INCOMPLETE`, полную Linux suite проверяет CI. Module-wide Windows skips убраны из installer/updater tests: Windows пропускает только Bash subprocess cases при отсутствии рабочего Bash, а portable source assertions остаются runnable. AF_UNIX/SO_PEERCRED suite помечен Linux-only; Ubuntu backend CI запускает `pytest tests/` целиком.
