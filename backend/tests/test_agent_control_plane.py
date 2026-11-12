@@ -323,7 +323,7 @@ async def test_typed_client_preserves_agent_ipc_rejection(tmp_path):
 
     path = tmp_path / "reject.sock"
     agent = MockNetworkAgent(foreign_objects={
-        "tempest-policy-protected-ingress": "operator",
+        "tempest-ingress-default-block": "operator",
     })
     server = AgentServer(
         path,
