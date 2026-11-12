@@ -13,10 +13,13 @@ from uuid import uuid4
 from app.config import settings
 from app.network_agent.models import (
     MAX_IPC_MESSAGE_BYTES,
+    AgentStatus,
     DiffRequest,
     IPCResponse,
+    NetworkDiff,
     NetworkPlan,
     ReadStatusRequest,
+    ValidationResult,
     ValidateRequest,
 )
 
@@ -27,6 +30,14 @@ class NetworkAgentUnavailable(RuntimeError):
 
 class NetworkApplyUnsupported(RuntimeError):
     """No real, recoverable NetworkPlan apply exists yet."""
+
+
+class NetworkAgentRejected(RuntimeError):
+    """The Agent returned a typed error for a well-formed request."""
+
+    def __init__(self, code: str, method: str):
+        super().__init__(f"Agent rejected {method}: {code}")
+        self.code = code
 
 
 class NetworkAgentClient:
@@ -54,9 +65,7 @@ class NetworkAgentClient:
                 if response.request_id != request.request_id:
                     raise NetworkAgentUnavailable("Agent response request ID mismatch")
                 if not response.ok:
-                    raise NetworkAgentUnavailable(
-                        f"Agent rejected {request.method}: {response.error.code}"
-                    )
+                    raise NetworkAgentRejected(response.error.code, request.method)
                 return response
             finally:
                 writer.close()
@@ -65,18 +74,27 @@ class NetworkAgentClient:
         try:
             return await asyncio.wait_for(exchange(), timeout=self._timeout)
         except (OSError, asyncio.TimeoutError, EOFError, ValueError) as exc:
-            if isinstance(exc, NetworkAgentUnavailable):
+            if isinstance(exc, (NetworkAgentUnavailable, NetworkAgentRejected)):
                 raise
             raise NetworkAgentUnavailable("Network Agent IPC unavailable or invalid") from exc
 
+    @staticmethod
+    def _expect_result(response: IPCResponse, expected_type: type, method: str) -> IPCResponse:
+        if not isinstance(response.result, expected_type):
+            raise NetworkAgentUnavailable(f"Agent returned an invalid {method} result")
+        return response
+
     async def validate(self, plan: NetworkPlan) -> IPCResponse:
-        return await self._call(ValidateRequest(request_id=uuid4(), method="validate", plan=plan))
+        response = await self._call(ValidateRequest(request_id=uuid4(), method="validate", plan=plan))
+        return self._expect_result(response, ValidationResult, "validate")
 
     async def diff(self, plan: NetworkPlan) -> IPCResponse:
-        return await self._call(DiffRequest(request_id=uuid4(), method="diff", plan=plan))
+        response = await self._call(DiffRequest(request_id=uuid4(), method="diff", plan=plan))
+        return self._expect_result(response, NetworkDiff, "diff")
 
     async def read_status(self) -> IPCResponse:
-        return await self._call(ReadStatusRequest(request_id=uuid4(), method="read_status"))
+        response = await self._call(ReadStatusRequest(request_id=uuid4(), method="read_status"))
+        return self._expect_result(response, AgentStatus, "read_status")
 
     async def apply(self, plan: NetworkPlan) -> None:
         # Validate the typed input at the caller, but never interpret it as

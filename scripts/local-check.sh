@@ -51,7 +51,7 @@ run_backend() {
 run_quick() {
   require_backend
   (cd "$BACKEND_DIR" && run_timed "Network Agent / NetworkPlan contract tests" \
-    .venv/bin/python -m pytest tests/test_network_agent_ipc.py tests/test_network_plan_contract.py tests/test_agent_control_plane.py -q)
+    .venv/bin/python -m pytest tests/test_network_agent_ipc.py tests/test_network_plan_contract.py tests/test_agent_control_plane.py tests/test_network_plan_builder.py -q)
 }
 
 run_frontend() {

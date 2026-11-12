@@ -5,14 +5,17 @@ import os
 import socket
 import sys
 import threading
+import asyncio
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
 from app.config import settings
 from app.network_agent.client import NetworkAgentClient, NetworkApplyUnsupported
 from app.network_agent.mock import MockNetworkAgent
+from app.network_agent.models import AgentStatus, IPCResponse, NetworkDiff, ValidationResult
 from app.network_agent.service import AgentServer, PeerPolicy
 from tests.test_network_plan_contract import make_plan
 
@@ -144,6 +147,142 @@ def test_plan_api_has_auth_and_fails_when_agent_absent(agent_client, auth_header
     assert agent_client.post("/api/network-plan/validate", json={**plan, "command": "id"}, headers=auth_headers).status_code == 422
 
 
+def test_current_plan_is_db_derived_and_agent_validated(agent_client, auth_headers, sample_node, monkeypatch):
+    from app.api import network_plan
+
+    status = IPCResponse(
+        request_id=uuid4(), ok=True,
+        result=AgentStatus(state="idle", active_generation=0, last_known_good_generation=0),
+    )
+    monkeypatch.setattr(network_plan.network_agent_client, "read_status", AsyncMock(return_value=status))
+    monkeypatch.setattr(
+        network_plan.network_agent_client,
+        "validate",
+        AsyncMock(side_effect=lambda plan: IPCResponse(
+            request_id=uuid4(), ok=True,
+            result=ValidationResult(
+                generation_id=plan.generation_id,
+                fingerprint=plan.fingerprint(),
+                operation_count=len(plan.operations),
+                permitted_egress_count=len(plan.egress_candidates),
+            ),
+        )),
+    )
+    monkeypatch.setattr(
+        network_plan.network_agent_client,
+        "diff",
+        AsyncMock(side_effect=lambda plan: IPCResponse(
+            request_id=uuid4(), ok=True,
+            result=NetworkDiff(
+                generation_id=plan.generation_id,
+                base_generation=plan.base_generation,
+                target_generation=plan.generation,
+            ),
+        )),
+    )
+
+    current = agent_client.get("/api/network-plan/current", headers=auth_headers)
+    assert current.status_code == 200
+    assert current.json()["default_egress_id"] == f"tempest-egress-node-{sample_node.id}"
+    assert current.json()["operations"][0]["verdict"] == "block"
+    assert agent_client.post("/api/network-plan/current/validate", headers=auth_headers).status_code == 200
+    assert agent_client.post("/api/network-plan/current/diff", headers=auth_headers).status_code == 200
+    assert network_plan.network_agent_client.validate.await_count == 1
+    assert network_plan.network_agent_client.diff.await_count == 1
+
+
+def test_current_plan_fails_closed_for_empty_db_configuration(agent_client, auth_headers, monkeypatch):
+    from app.api import network_plan
+
+    monkeypatch.setattr(
+        network_plan.network_agent_client,
+        "read_status",
+        AsyncMock(return_value=IPCResponse(
+            request_id=uuid4(), ok=True,
+            result=AgentStatus(state="idle", active_generation=0, last_known_good_generation=0),
+        )),
+    )
+    validate = AsyncMock()
+    monkeypatch.setattr(network_plan.network_agent_client, "validate", validate)
+
+    response = agent_client.post("/api/network-plan/current/validate", headers=auth_headers)
+    assert response.status_code == 422
+    assert "no enabled egress" in response.json()["detail"]
+    validate.assert_not_awaited()
+
+
+def test_current_plan_fails_closed_when_agent_is_absent(agent_client, auth_headers, sample_node, monkeypatch, tmp_path):
+    from app.api import network_plan
+
+    monkeypatch.setattr(
+        network_plan.network_agent_client,
+        "_socket_path",
+        str(tmp_path / "agent-not-installed.sock"),
+    )
+    response = agent_client.get("/api/network-plan/current", headers=auth_headers)
+    assert response.status_code == 503
+
+
+def test_plan_api_maps_agent_conflict_to_http_conflict(agent_client, auth_headers, monkeypatch):
+    from app.api import network_plan
+    from app.network_agent.client import NetworkAgentRejected
+
+    monkeypatch.setattr(
+        network_plan.network_agent_client,
+        "validate",
+        AsyncMock(side_effect=NetworkAgentRejected("conflict", "validate")),
+    )
+    response = agent_client.post(
+        "/api/network-plan/validate", json=make_plan().model_dump(mode="json"), headers=auth_headers
+    )
+    assert response.status_code == 409
+
+
+def test_concurrent_db_plan_inspections_are_read_only(agent_mode, engine, sample_node, monkeypatch):
+    from app.api import network_plan
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    _, async_engine = engine
+    monkeypatch.setattr(
+        network_plan.network_agent_client,
+        "read_status",
+        AsyncMock(return_value=IPCResponse(
+            request_id=uuid4(), ok=True,
+            result=AgentStatus(state="idle", active_generation=2, last_known_good_generation=2),
+        )),
+    )
+    monkeypatch.setattr(
+        network_plan.network_agent_client,
+        "validate",
+        AsyncMock(side_effect=lambda plan: IPCResponse(
+            request_id=uuid4(), ok=True,
+            result=ValidationResult(
+                generation_id=plan.generation_id,
+                fingerprint=plan.fingerprint(),
+                operation_count=len(plan.operations),
+                permitted_egress_count=len(plan.egress_candidates),
+            ),
+        )),
+    )
+
+    async def inspect_twice():
+        async with AsyncSession(async_engine) as first, AsyncSession(async_engine) as second:
+            return await asyncio.gather(
+                network_plan.validate_current_plan(first),
+                network_plan.validate_current_plan(second),
+            )
+
+    first_response, second_response = asyncio.run(inspect_twice())
+    first = first_response["plan"]
+    second = second_response["plan"]
+    assert first.generation == second.generation == 3
+    assert first.base_generation == second.base_generation == 2
+    assert first.generation_id != second.generation_id
+    assert first.operations == second.operations
+    assert network_plan.network_agent_client.validate.await_count == 2
+    assert network_plan.network_agent_client.read_status.await_count == 2
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(
     not sys.platform.startswith("linux") or not hasattr(socket, "SO_PEERCRED"),
@@ -172,3 +311,44 @@ async def test_typed_client_uses_real_unix_transport_for_read_only_contract(tmp_
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux") or not hasattr(socket, "SO_PEERCRED"),
+    reason="SO_PEERCRED transport requires Linux",
+)
+async def test_typed_client_preserves_agent_ipc_rejection(tmp_path):
+    from app.network_agent.client import NetworkAgentRejected
+
+    path = tmp_path / "reject.sock"
+    agent = MockNetworkAgent(foreign_objects={
+        "tempest-policy-protected-ingress": "operator",
+    })
+    server = AgentServer(
+        path,
+        agent=agent,
+        peer_policy=PeerPolicy(frozenset({os.getuid()}), frozenset({os.getgid()})),
+    )
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
+    thread.start()
+    try:
+        client = NetworkAgentClient(str(path))
+        with pytest.raises(NetworkAgentRejected) as error:
+            await client.validate(make_plan())
+        assert error.value.code == "ownership_conflict"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_typed_client_rejects_method_mismatched_result():
+    from app.network_agent.client import NetworkAgentUnavailable
+
+    response = IPCResponse(
+        request_id=uuid4(), ok=True,
+        result=AgentStatus(state="idle", active_generation=0, last_known_good_generation=0),
+    )
+    with pytest.raises(NetworkAgentUnavailable, match="invalid validate result"):
+        NetworkAgentClient._expect_result(response, ValidationResult, "validate")

@@ -78,6 +78,9 @@ def agent_mode_request_is_allowed(method: str, path: str) -> bool:
         ("POST", "/api/network-plan/validate"),
         ("POST", "/api/network-plan/diff"),
         ("GET", "/api/network-plan/status"),
+        ("GET", "/api/network-plan/current"),
+        ("POST", "/api/network-plan/current/validate"),
+        ("POST", "/api/network-plan/current/diff"),
     }
 
 

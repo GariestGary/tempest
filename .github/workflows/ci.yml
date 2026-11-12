@@ -36,7 +36,7 @@ jobs:
       - name: Run safe Linux Network Agent IPC and sandbox checks
         # These tests use temporary AF_UNIX sockets and inspect the unit text.
         # They do not install/start systemd units or modify runner networking.
-        run: python -m pytest tests/test_network_agent_ipc.py tests/test_network_plan_contract.py tests/test_agent_control_plane.py -q
+        run: python -m pytest tests/test_network_agent_ipc.py tests/test_network_plan_contract.py tests/test_agent_control_plane.py tests/test_network_plan_builder.py -q
 
       - name: Run pytest
         run: python -m pytest tests/ -q

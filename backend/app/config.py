@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # has moved every operational path and its compatibility tests pass.
     control_plane_mode: Literal["legacy", "agent"] = "legacy"
     network_agent_socket: str = "/run/tempest-agent/control.sock"
+    network_agent_namespace_id: str = "tempest-ns-default"
     legacy_router_enabled: bool = False
     legacy_wifi_dhcp_enabled: bool = False
     legacy_ssh_deploy_enabled: bool = False

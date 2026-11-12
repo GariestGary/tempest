@@ -1,4 +1,4 @@
-# Задача 2.3 — карта миграции сетевых вызовов (2026-11-11)
+# Задача 2.3 — карта миграции сетевых вызовов (обновлена 2026-11-12)
 
 Статический аудит текущего `master` до первой части 2.3. Обозначения: **N** — понадобится TEMPEST после отдельного проектирования `NetworkPlan`; **L** — legacy/не нужен для MVP; **H** — опасное изменение хоста, не входящее в контракт Agent v1. Вызов может иметь несколько категорий. Эта карта не утверждает, что runtime уже изолирован или что все вызовы перенесены.
 
@@ -20,6 +20,14 @@
 `CONTROL_PLANE_MODE=agent` — **явно включаемый** профиль миграции. `DEV_SAFE_MODE=1` имеет приоритет и сохраняет прежний dev-safe Compose/no-op контракт. Новый профиль допускает только health/auth и авторизованные `NetworkPlan` validate/diff/status через типизированный AF_UNIX клиент. Остальные HTTP/WS пути получают `501 NETWORK_PLAN_OPERATION_UNSUPPORTED`; dataplane dispatch и `_apply_nftables` отказывают до прямого вызова. Никакого успешного apply через mock Agent нет. Флаги `LEGACY_ROUTER_ENABLED`, `LEGACY_WIFI_DHCP_ENABLED`, `LEGACY_SSH_DEPLOY_ENABLED`, `LEGACY_DOCKER_SIDECARS_ENABLED` по умолчанию выключены; даже их включение не открывает заблокированные endpoints в Agent mode, пока реализации не перенесены.
 
 Это предохранительная граница первой части, а не законченная миграция. По умолчанию остаётся legacy поведение PiTun ради текущей совместимости; такой профиль небезопасен для установки на хост без дальнейших работ. В Agent mode VPN трафик пока **недоступен**. Следующий срез 2.3 должен формировать реальные планы из DB, вынести все необходимые вызовы и устранить прямые обходы внутри менеджеров/фоновых задач. Перед любым реальным apply нужны отдельные задачи 2.5/2.6 и VM проверки.
+
+## Срез на проверку CI 2026-11-12: DB-derived plan inspection
+
+- `backend/app/network_agent/plan_builder.py` — чистый builder legacy `Node`/settings → v1 `NetworkPlan`. Он включает только enabled Node ID/protocol metadata, строит следующее поколение от Agent `read_status`, не сериализует адреса/credentials и не добавляет interface, route, allow policy или implicit DIRECT. Каждый план содержит mandatory protected-ingress block; статус Agent не idle, пустой набор узлов, некорректный `active_node_id`, неизвестный protocol и лимит более 64 enabled nodes fail closed.
+- `POST /api/network-plan/current/validate` и `/current/diff` формируют план из DB и вызывают только typed `ValidateRequest`/`DiffRequest`; `GET /current` позволяет просмотреть результат. `/status` сохраняет typed `ReadStatusRequest`. Все пути остаются под текущей HTTP auth.
+- Typed client проверяет тип результата для каждого метода и отличает Agent rejection от отсутствия/некорректного IPC. Ошибки conflict возвращаются как HTTP 409, invalid plan/configuration — 422, отсутствие/повреждение IPC — 503. Apply по-прежнему не имеет клиентского вызова.
+- Подготовлено к переносу в Agent inspection: DB-derived план-кандидат, validate, diff и status. Не перенесены реальные network mutations, routes/interfaces/firewall, Xray/engine lifecycle, health probes/failover, host DNS/network apply, router/Wi-Fi/DHCP, Docker sidecars, remote SSH deploy и их managers.
+- Все оставшиеся PiTun пути по-прежнему закрывает Agent-mode allowlist, `dataplane.py`/`system.py` refusal guards и startup early return; их вызовы не перенаправляются через `NetworkPlan` молча. Legacy mode сохраняется без изменений для совместимости. Targeted и полный backend CI ожидаются, так как Python на TORNADO недоступен.
 
 ## Открытые риски Agent
 
