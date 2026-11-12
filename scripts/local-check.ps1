@@ -67,7 +67,7 @@ function Run-BackendTargeted {
     Push-Location $BackendDir
     try {
         Invoke-Timed 'Targeted backend pytest (first failure stops run)' {
-            & $PythonExe -m pytest -x -q -rs tests/test_network_agent_ipc.py tests/test_network_plan_contract.py tests/test_agent_control_plane.py tests/test_network_plan_builder.py tests/test_agent_compose_isolation.py tests/test_install_script.py tests/test_update_script.py
+            & $PythonExe -m pytest -x -q -rs tests/test_network_agent_ipc.py tests/test_network_plan_contract.py tests/test_agent_control_plane.py tests/test_network_plan_builder.py tests/test_agent_compose_isolation.py tests/test_network_object_registry.py tests/test_install_script.py tests/test_update_script.py
         }
     }
     finally { Pop-Location }

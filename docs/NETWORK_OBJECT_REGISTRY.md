@@ -1,0 +1,25 @@
+# Network Object Registry — task 2.5, first review slice
+
+**Status:** pure model and in-memory backend are `READY_FOR_REVIEW`; task 2.5 remains `IN_PROGRESS`. No NetworkPlan v1 or IPC change, Linux backend, durable journal, or network mutation is included.
+
+Implementation: `backend/app/network_agent/registry.py`. Only Agent-local code may construct its inventory and retain receipts. `owner="tempest"` in a requested object is an intent assertion, **never ownership evidence**. The Control Plane cannot mint or supply the backend proof.
+
+## Model and invariants
+
+Each `NetworkObject` has a stable ID, typed kind, prepared namespace ID, owner, generation UUID/number, canonical configuration fingerprint, and exclusive `ResourceClaim` keys. Kinds cover nftables table/chain/rule, `ip rule`, routing table, route, WireGuard/TUN/managed interface. Claims distinguish nft table/chain/rule selectors, `ip rule` priority, routing table ID, fwmark, route slot and interface name. A collision is checked across every observed object in the same namespace, including foreign objects and objects with a `tempest-` prefix. Numeric claims use canonical nonzero decimal values. The next adapter must construct canonical keys from parsed kernel objects, including nft family/table/chain and route table/destination/metric; it must not accept an arbitrary encoded key from a caller.
+
+The registry keeps desired objects separate from independently observed, confirmed receipts. `diff` is read-only and reports added/changed/removed stable IDs. A repeated identical generation is idempotent; reuse with different intent or a stale base generation is rejected. `reconcile_mock` is explicitly test-only: it atomically changes an in-memory inventory after a complete snapshot and CAS revision check. The mock issues random proofs for created objects. Prior to every replacement or removal it rechecks that the live object exactly matches the Agent-held receipt: stable ID, type, namespace, claims, fingerprint and proof. Missing evidence, unexpected drift, incomplete inventory, duplicate ID/claim, or competing generation fails closed. Foreign objects remain untouched; there is no flush or bulk delete command.
+
+The mock proof demonstrates the control flow, not Linux ownership. A production implementation cannot infer ownership from a name, tag, fwmark, content hash, or a user-supplied owner field. It needs an Agent-protected creation journal plus fresh kernel observations tied to a stable, non-reused identity. If a subsystem cannot provide enough evidence after restart or handle reuse, the Agent must report a conflict and leave the object untouched. The namespace identity must be checked against the prepared target, not merely its display name.
+
+## Future Linux backend boundary
+
+The Linux backend should offer a complete typed inventory snapshot with revision/consistency evidence and exact-object operations guarded by fresh ownership checks. It must reject partial enumeration and ambiguous nft handles, route selectors, priorities, marks, table IDs, or interface identities. An interface name or routing table ID may be reused by another process; the backend cannot adopt it without the protected receipt and matching live evidence. Deletion must re-read the exact object immediately before mutation and abort on mismatch. Never issue global nft flush, `ip route flush`, broad table/rule deletion, default-route replacement, or an operation outside the prepared namespace. These are design requirements only; no Linux backend exists in this slice.
+
+Future Stage should validate registry claims and persist a candidate diff without mutation. Apply should revalidate a complete inventory, persist pending intent, then perform exact-object changes with per-object checks and compensation. Verify should observe actual owned resources and detect drift before Confirm. Confirm should bind the verified generation to last-known-good receipts. Rollback must recheck ownership of each object before restoring or deleting it; if evidence is lost, preserve the object and protected-ingress deny state and report degraded status. Those transactional and network operations belong to 2.6 and have not been implemented.
+
+Durable state needed before runtime use includes namespace identity/inode and boot identity, generation UUID/number and CAS base, canonical plan/object fingerprints, typed claims, independently minted creation receipts and kernel selectors, pending diff/deadline, verified status, and last-known-good snapshot. The journal must be writable only by Agent and survive a process restart. Recovery after reboot and reconciliation of recycled kernel handles require Linux VM tests and remain open.
+
+## Verification boundary
+
+`backend/tests/test_network_object_registry.py` exercises the pure mock without root, namespaces, nftables, netlink, TUN or WireGuard. It cannot prove a real Linux object is owned, that a kernel listing is complete, or that several kernel subsystems can be changed atomically. Those are later Linux VM gates. ADR-001 remains `PROPOSED`.

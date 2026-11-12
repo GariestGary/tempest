@@ -1,5 +1,11 @@
 # TEMPEST — статус форка
 
+## 2026-11-12 · этап 2, задача 2.5 — первая часть READY_FOR_REVIEW
+
+Владелец принял 2.4 после review `6cbb73b22146ccba1ad123183e4e147dc8f59f2b` и успешного [CI #26](https://github.com/GariestGary/tempest/actions/runs/43214500514). Задача 2.5 остаётся `IN_PROGRESS`; первая чистая модель [NetworkObjectRegistry](NETWORK_OBJECT_REGISTRY.md) подготовлена к review. Типизированы network object kinds и эксклюзивные claims, разделены desired и independently confirmed inventory, добавлены CAS, idempotency, diff, drift/conflict detection и проверка Agent-held proof перед изменением или удалением. Mock backend работает только в памяти и не вызывает Linux networking. NetworkPlan v1/IPC не менялись.
+
+Локально: 15 registry tests pass; targeted backend 83 passed / 71 skipped (пропуски Linux AF_UNIX и Bash без рабочего executable не считаются pass). Linux CI и CodeQL будут проверены после публикации. Linux backend, durable ownership journal, runtime namespace/capability/UID mapping и реальные network mutations не реализованы и не испытаны. Этап 2 и Gate 2 остаются `IN_PROGRESS`; ADR-001 `PROPOSED`. На TORNADO, TYPHOON и VORTEX сетевые операции не выполнялись.
+
 ## 2026-11-12 · этап 2, задача 2.4 — READY_FOR_REVIEW
 
 Кодовый коммит: `526ac938d09f1ade4a7804b4f3237235662568dc`.

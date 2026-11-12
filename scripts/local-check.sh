@@ -53,6 +53,7 @@ run_backend_targeted() {
       tests/test_agent_control_plane.py \
       tests/test_network_plan_builder.py \
       tests/test_agent_compose_isolation.py \
+      tests/test_network_object_registry.py \
       tests/test_install_script.py \
       tests/test_update_script.py)
 }
