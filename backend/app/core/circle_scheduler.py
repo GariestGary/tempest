@@ -58,6 +58,9 @@ class CircleScheduler:
         return lock
 
     def start(self) -> None:
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy node-circle scheduler")
         if self._task is None or self._task.done():
             self._running = True
             self._task = asyncio.create_task(self._loop())
@@ -271,6 +274,9 @@ class CircleScheduler:
         outcome, so an aborted rotation just means "wait for the next
         normal tick" — no permanent failure mode.
         """
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy node-circle rotation")
         lock = self._get_rotate_lock(circle_id)
         async with lock:
             deadline = self._ROTATE_DEADLINE_S

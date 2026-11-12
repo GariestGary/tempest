@@ -27,6 +27,9 @@ class HealthChecker:
         self._running = False
 
     def start(self) -> None:
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy health-check scheduler")
         if self._task is None or self._task.done():
             self._running = True
             # Two loops: fast (active node, default 30s, drives failover)
@@ -157,6 +160,9 @@ class HealthChecker:
              switch logic as before — preserved for users who use
              standalone failover without circles.
         """
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy health-check failover")
         async with AsyncSession(get_async_engine()) as session:
             failover_enabled = await self._get_setting(session, "failover_enabled") or "false"
             if failover_enabled.lower() != "true":

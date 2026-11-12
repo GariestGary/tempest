@@ -52,6 +52,9 @@ def _validate_cidr(cidr: str) -> bool:
 
 async def _run_exec(*args: str) -> tuple[int, str, str]:
     """Run a command without shell (safe from injection)."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("PiTun nftables command")
     proc = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,
@@ -63,6 +66,9 @@ async def _run_exec(*args: str) -> tuple[int, str, str]:
 
 async def _nft(script: str) -> bool:
     """Apply an nft script via stdin pipe (no shell, no heredoc)."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("PiTun nftables apply")
     proc = await asyncio.create_subprocess_exec(
         "nft", "-f", "-",
         stdin=asyncio.subprocess.PIPE,
@@ -519,6 +525,9 @@ async def apply_router_nat(
     the LAN path is untouched, so tightening the uplink cannot lock the
     operator out of a box they administer over the LAN.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy router NAT apply")
     if not (_validate_iface(wan) and _validate_iface(lan)):
         logger.error("Router NAT: invalid interface names (wan=%r lan=%r)", wan, lan)
         return False
@@ -691,6 +700,9 @@ async def remove_router_nat() -> bool:
     checked first so a gateway-mode box — where this runs on every boot and
     the table never exists — stops logging an nft error for normal operation.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy router NAT removal")
     rc, _out, _err = await _run_exec("nft", "list", "table", "inet", _ROUTER_TABLE)
     if rc != 0:
         return True  # nothing to remove

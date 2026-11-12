@@ -140,6 +140,9 @@ def host_run(
     effort and will likely fail on host-side mutation, but lets the
     read-only paths work for local iteration.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy host network command")
     _validate_argv(argv)
     # Re-derive the program name from the literal allowlist instead of
     # passing `argv[0]` directly into subprocess. At runtime this is a

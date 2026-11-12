@@ -7,6 +7,9 @@ log = logging.getLogger("pitun.tun")
 
 async def setup_tun(address: str = "10.0.0.1/30", mtu: int = 9000) -> None:
     """Create and configure tun0 interface (called when autoRoute=False)."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy TUN setup")
     cmds = [
         ["ip", "tuntap", "add", "dev", "tun0", "mode", "tun"],
         ["ip", "addr", "add", address, "dev", "tun0"],
@@ -26,6 +29,9 @@ async def setup_tun(address: str = "10.0.0.1/30", mtu: int = 9000) -> None:
 
 async def teardown_tun() -> None:
     """Remove tun0 interface."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy TUN teardown")
     proc = await asyncio.create_subprocess_exec(
         "ip", "link", "del", "tun0",
         stdout=asyncio.subprocess.DEVNULL,

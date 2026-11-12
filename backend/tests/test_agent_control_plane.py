@@ -126,6 +126,100 @@ async def test_agent_mode_direct_and_deferred_dataplane_fail_explicitly(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_agent_mode_internal_network_services_fail_before_side_effects(monkeypatch):
+    """Calling legacy internals directly must not bypass HTTP middleware."""
+    from app.core import network_apply, network_config, nftables, router_mode, tun
+
+    monkeypatch.setattr(settings, "dev_safe_mode", False)
+    monkeypatch.setattr(settings, "control_plane_mode", "agent")
+    with ExitStack() as stack:
+        subprocess_run = stack.enter_context(patch("app.core.network_config.subprocess.run"))
+        process_start = stack.enter_context(patch("asyncio.create_subprocess_exec", new_callable=AsyncMock))
+        file_open = stack.enter_context(patch("builtins.open"))
+
+        with pytest.raises(NetworkApplyUnsupported):
+            network_config.host_run(["ip", "route", "replace", "default"])
+        with pytest.raises(NetworkApplyUnsupported):
+            network_apply.apply(None)
+        with pytest.raises(NetworkApplyUnsupported):
+            network_apply.rollback()
+        with pytest.raises(NetworkApplyUnsupported):
+            router_mode.set_ip_forward(True)
+        with pytest.raises(NetworkApplyUnsupported):
+            await nftables._nft("flush ruleset")
+        with pytest.raises(NetworkApplyUnsupported):
+            await nftables._run_exec("ip", "route", "replace", "default")
+        with pytest.raises(NetworkApplyUnsupported):
+            await tun.setup_tun()
+        with pytest.raises(NetworkApplyUnsupported):
+            await tun.teardown_tun()
+
+    subprocess_run.assert_not_called()
+    process_start.assert_not_awaited()
+    file_open.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_internal_engine_and_legacy_service_calls_fail_closed(monkeypatch):
+    from app.api import system
+    from app.core import circle_scheduler, config_gen, dhcp, healthcheck, naive_manager, ssh, updater, wifi, xray
+
+    monkeypatch.setattr(settings, "dev_safe_mode", False)
+    monkeypatch.setattr(settings, "control_plane_mode", "agent")
+    with ExitStack() as stack:
+        process_start = stack.enter_context(patch("asyncio.create_subprocess_exec", new_callable=AsyncMock))
+        docker_start = stack.enter_context(patch.object(wifi, "_docker_client"))
+        dhcp_docker_start = stack.enter_context(patch.object(dhcp, "_docker_client"))
+        naive_write = stack.enter_context(patch.object(naive_manager.naive_manager, "_write_config_sync"))
+        engine_lock = stack.enter_context(patch.object(xray.xray_manager, "_acquire_lock_or_raise", new_callable=AsyncMock))
+        host_open = stack.enter_context(patch("builtins.open"))
+        update_dir = stack.enter_context(patch.object(type(updater.DATA_DIR), "mkdir"))
+
+        with pytest.raises(NetworkApplyUnsupported):
+            await xray.xray_manager.start()
+        with pytest.raises(NetworkApplyUnsupported):
+            await xray.xray_manager.stop()
+        with pytest.raises(NetworkApplyUnsupported):
+            await xray.xray_manager._start_unlocked()
+        with pytest.raises(NetworkApplyUnsupported):
+            await config_gen.write_config({}, validate=False)
+        with pytest.raises(NetworkApplyUnsupported):
+            wifi._start_sync(None)
+        with pytest.raises(NetworkApplyUnsupported):
+            dhcp._start_sync(None)
+        with pytest.raises(NetworkApplyUnsupported):
+            await naive_manager.naive_manager.start_node(None)
+        with pytest.raises(NetworkApplyUnsupported):
+            await ssh.exec_remote_script(host="example.invalid", script_content="true")
+        with pytest.raises(NetworkApplyUnsupported):
+            await system.apply_system_toggles_on_boot()
+        with pytest.raises(NetworkApplyUnsupported):
+            updater.write_request(version="1.0")
+        checker = healthcheck.HealthChecker()
+        with pytest.raises(NetworkApplyUnsupported):
+            checker.start()
+        assert checker._task is None
+        with pytest.raises(NetworkApplyUnsupported):
+            await circle_scheduler.circle_scheduler.rotate_circle(1)
+
+    process_start.assert_not_awaited()
+    docker_start.assert_not_called()
+    dhcp_docker_start.assert_not_called()
+    naive_write.assert_not_awaited()
+    engine_lock.assert_not_awaited()
+    host_open.assert_not_called()
+    update_dir.assert_not_called()
+
+
+def test_agent_boundary_preserves_legacy_profile(monkeypatch):
+    from app.core.agent_boundary import require_legacy_engine, require_legacy_network
+
+    monkeypatch.setattr(settings, "control_plane_mode", "legacy")
+    require_legacy_network("legacy test operation")
+    require_legacy_engine("legacy test engine operation")
+
+
+@pytest.mark.asyncio
 async def test_typed_client_refuses_mock_apply_and_missing_socket(tmp_path):
     plan = make_plan()
     client = NetworkAgentClient(str(tmp_path / "absent.sock"), timeout=0.1)

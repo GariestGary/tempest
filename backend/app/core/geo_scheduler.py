@@ -66,6 +66,9 @@ class GeoScheduler:
         self._running = False
 
     def start(self) -> None:
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy geodata scheduler")
         if self._task is None or self._task.done():
             self._running = True
             self._task = asyncio.create_task(self._loop(), name="geo-scheduler")

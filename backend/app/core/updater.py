@@ -213,6 +213,9 @@ def write_request(
     Written atomically: the agent is triggered by the file APPEARING, so a
     half-written request would be read and consumed as garbage.
     """
+    from app.core.agent_boundary import require_legacy_host_operation
+
+    require_legacy_host_operation("legacy host update request")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     body = {
         "version": version or "",

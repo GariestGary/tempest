@@ -154,6 +154,9 @@ class XrayManager:
             ) from exc
 
     async def start(self) -> None:
+        from app.core.agent_boundary import require_legacy_engine
+
+        require_legacy_engine("Xray engine start")
         await self._acquire_lock_or_raise("start")
         try:
             await self._start_unlocked()
@@ -161,6 +164,9 @@ class XrayManager:
             self._lock.release()
 
     async def stop(self) -> None:
+        from app.core.agent_boundary import require_legacy_engine
+
+        require_legacy_engine("Xray engine stop")
         await self._acquire_lock_or_raise("stop")
         try:
             await self._stop_unlocked()
@@ -168,6 +174,9 @@ class XrayManager:
             self._lock.release()
 
     async def restart(self) -> None:
+        from app.core.agent_boundary import require_legacy_engine
+
+        require_legacy_engine("Xray engine restart")
         await self._acquire_lock_or_raise("restart")
         try:
             await self._stop_unlocked()
@@ -176,6 +185,9 @@ class XrayManager:
             self._lock.release()
 
     async def reload(self) -> None:
+        from app.core.agent_boundary import require_legacy_engine
+
+        require_legacy_engine("Xray engine reload")
         await self._acquire_lock_or_raise("reload")
         try:
             if self.is_running:
@@ -186,6 +198,9 @@ class XrayManager:
             self._lock.release()
 
     async def _start_unlocked(self) -> None:
+        from app.core.agent_boundary import require_legacy_engine
+
+        require_legacy_engine("Xray engine start")
         if self.is_running:
             logger.warning("xray already running (pid=%d)", self.pid)
             return
@@ -217,6 +232,9 @@ class XrayManager:
         self._log_task = asyncio.create_task(self._read_logs())
 
     async def _stop_unlocked(self) -> None:
+        from app.core.agent_boundary import require_legacy_engine
+
+        require_legacy_engine("Xray engine stop")
         global _tun_active
         if not self.is_running:
             return
@@ -297,6 +315,9 @@ async def _auto_restart_if_enabled(*, from_boot: bool = False) -> None:
     The crash-monitor (`XrayManager._monitor`) calls without args, so
     real unexpected exits still emit the event.
     """
+    from app.core.agent_boundary import require_legacy_engine
+
+    require_legacy_engine("legacy Xray crash-restart callback")
     try:
         from sqlmodel import select
         from sqlmodel.ext.asyncio.session import AsyncSession

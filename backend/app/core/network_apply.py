@@ -560,6 +560,9 @@ class ApplyRequest:
 def apply(req: ApplyRequest) -> Backup:
     """Validate, snapshot, then mutate. Returns the Backup the caller
     can quote back in the UI as 'rollback target'."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy host network apply")
     # Validate inputs FIRST — empty apply (no gateway, no dns) is a
     # no-op and surfaces as a 400 instead of silently doing nothing.
     if req.gateway is None and req.dns is None:
@@ -609,6 +612,9 @@ def rollback(backup_id: Optional[str] = None) -> Backup:
     Restores BOTH the config files (so the change survives reboot)
     AND the runtime state via ``ip route replace`` + /etc/resolv.conf
     rewrite (so the rollback takes effect immediately)."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy host network rollback")
     backups = sorted(_list_backup_filenames(), reverse=True)
     if not backups:
         raise NetworkApplyError("No backups available to roll back to.")
@@ -857,6 +863,9 @@ def _fallback_via_resolvconf(servers: List[str]) -> dict:
 
 
 def apply_host_fallback_dns(servers: List[str]) -> dict:
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy host DNS apply")
     """Ensure `servers` are present as FALLBACK DNS for the host's own
     resolver, additively (DHCP/router DNS stays primary).
 

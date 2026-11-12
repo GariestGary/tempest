@@ -264,6 +264,9 @@ class NaiveManager:
         Safe to call on an already-running container: it will be recreated
         with the current config.
         """
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy Docker sidecar start")
         if node.protocol != "naive":
             return
         if not node.internal_port:
@@ -286,6 +289,9 @@ class NaiveManager:
 
         Safe to call on a missing container / missing file.
         """
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy Docker sidecar stop")
         lock = self._lock_for(node_id)
         async with lock:
             name = self.container_name(node_id)
@@ -295,6 +301,9 @@ class NaiveManager:
 
     async def restart_node(self, node: Node) -> None:
         """Explicit restart (= start_node)."""
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy Docker sidecar restart")
         await self.start_node(node)
 
     async def get_status(self, node_id: int) -> Dict[str, Any]:

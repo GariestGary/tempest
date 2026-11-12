@@ -209,6 +209,9 @@ BRIDGE_NAME = "br-lan"
 
 
 def _ip(*args: str, timeout: float = 10.0):
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy Wi-Fi network command")
     from app.core.network_config import host_run
     return host_run(["ip", *args], timeout=timeout)
 
@@ -364,6 +367,9 @@ def dissolve_lan_bridge(name: str = BRIDGE_NAME) -> dict:
     and the address off the live bridge means it undoes what is actually there
     rather than what a config file believes.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy LAN bridge teardown")
     if not bridge_exists(name):
         return {"bridge": name, "removed": False}
 
@@ -393,6 +399,9 @@ def dissolve_lan_bridge(name: str = BRIDGE_NAME) -> dict:
 def remove_lan_bridge(wired_lan, address_cidr: str,
                       name: str = BRIDGE_NAME) -> dict:
     """Undo `create_lan_bridge`, returning the address to the primary port."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy LAN bridge removal")
     members = [wired_lan] if isinstance(wired_lan, str) else list(wired_lan)
     members = [m for m in members if m]
     if not bridge_exists(name):
@@ -421,6 +430,9 @@ from app.config import settings  # noqa: E402
 
 
 def write_conf(conf: str) -> str:
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy Wi-Fi sidecar configuration")
     os.makedirs(CONF_DIR, exist_ok=True)
     path = os.path.join(CONF_DIR, CONF_NAME)
     # The passphrase lives here in the clear (hostapd needs it that way), so
@@ -440,6 +452,9 @@ def _docker_client():
 
 
 def _start_sync(cfg: WifiConfig) -> dict:
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy Wi-Fi sidecar start")
     from docker.errors import ImageNotFound, NotFound
 
     conf = render_hostapd_conf(cfg)      # validates before anything runs
@@ -530,6 +545,9 @@ def _radio_is_ap(interface: str, *, timeout: float = 15.0) -> bool:
 
 
 def _stop_sync() -> dict:
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy Wi-Fi sidecar stop")
     from docker.errors import NotFound
     try:
         _docker_client().containers.get(CONTAINER_NAME).remove(force=True)

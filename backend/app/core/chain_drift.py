@@ -36,6 +36,9 @@ class ChainDriftScheduler:
         self._running = False
 
     def start(self) -> None:
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy deployment-drift scheduler")
         if self._task and not self._task.done():
             return
         self._running = True

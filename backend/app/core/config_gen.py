@@ -1672,6 +1672,9 @@ async def write_config(
     file in place and validate each other's half-written JSON. The lock
     covers write AND `xray run -test`, since the test re-reads the path.
     """
+    from app.core.agent_boundary import require_legacy_engine
+
+    require_legacy_engine("legacy Xray configuration write")
     async with _write_lock():
         return await _write_config_unlocked(
             config, validate=validate, settings_map=settings_map,
@@ -1699,6 +1702,9 @@ async def _write_config_unlocked(
         re-writing the config (`validate=False` on the retry to avoid
         loops).
     """
+    from app.core.agent_boundary import require_legacy_engine
+
+    require_legacy_engine("legacy Xray configuration write")
     import asyncio
 
     def _write() -> None:

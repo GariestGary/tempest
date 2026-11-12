@@ -81,6 +81,9 @@ class AutoCheckScheduler:
         self._total = 0
 
     def start(self) -> None:
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy automatic-check scheduler")
         if self._task and not self._task.done():
             return
         self._running = True

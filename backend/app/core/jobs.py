@@ -289,6 +289,9 @@ class JobManager:
         Raises `SlotBusy` if `(server_id, protocol)` already has a
         running job (deploy or uninstall). Caller maps to HTTP 409.
         """
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy SSH deployment job")
         slot = (server_id, protocol)
         if self._slot_busy.get(slot):
             raise SlotBusy(

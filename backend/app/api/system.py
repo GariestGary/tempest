@@ -117,6 +117,9 @@ _HOST_RESOLV = "/host/resolv.conf"  # bind-mounted from host /etc/resolv.conf
 
 async def apply_system_toggles_on_boot() -> None:
     """Apply saved IPv6 and resolver settings unless safe mode is enabled."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy host system toggles")
     from app.config import settings as app_settings
 
     if app_settings.dev_safe_mode:
@@ -960,6 +963,9 @@ async def get_system_metrics(
 
 @router.patch("/settings", status_code=204)
 async def update_settings(body: SettingsUpdate, session: AsyncSession = Depends(get_session)):
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy system and host network settings update")
     patches = body.model_dump(exclude_unset=True)
 
     # Xray policy bounds. These knobs are easy to get wrong and the
@@ -1483,6 +1489,9 @@ async def _regenerate_and_write(session: AsyncSession, *, _self_heal_attempts: i
     retry the write with the smaller ruleset. Bounded to 5 attempts
     so a pathological `.dat` mismatch can't infinite-loop.
     """
+    from app.core.agent_boundary import require_legacy_engine
+
+    require_legacy_engine("legacy Xray configuration generation")
     from app.core.config_gen import generate_config, write_config, collect_routing_set_context
 
     settings_map = await _load_settings_map(session)

@@ -36,6 +36,9 @@ class RouterModeError(RuntimeError):
 
 def set_ip_forward(enabled: bool) -> bool:
     """Toggle IPv4 forwarding on the host. Without it nothing routes."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy router IP forwarding")
     try:
         with open(f"{_HOST_PROC_SYS}/net/ipv4/ip_forward", "w") as f:
             f.write("1" if enabled else "0")
@@ -251,6 +254,9 @@ async def reconcile_on_boot(session: AsyncSession) -> dict:
     and the other crash-looping on a missing radio. So a failure tears the
     whole thing down and says so.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy router boot reconciliation")
     m = await _settings_map(session)
     if m.get("operating_mode", "gateway") != "router":
         return await teardown()
@@ -287,6 +293,9 @@ async def teardown() -> dict:
     socket (or was already half-configured) would be stuck in router mode with
     no way back — and gateway is the state that keeps the LAN working.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy router teardown")
     steps: dict = {}
     try:
         steps["dhcp"] = (await dhcp_mod.stop())["running"] is False
@@ -330,6 +339,9 @@ async def apply(session: AsyncSession) -> dict:
     Returns a summary. Raises RouterModeError if router mode was requested but
     could not be brought up — the box is left in gateway mode in that case.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy router apply")
     m = await _settings_map(session)
     if m.get("operating_mode", "gateway") != "router":
         return await teardown()

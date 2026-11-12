@@ -198,6 +198,9 @@ def _is_limited(hc: Dict[str, Any], host_mem_bytes: int) -> bool:
 
 
 def _apply_sync(limits: Dict[str, Any]) -> List[Dict[str, Any]]:
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy Docker resource-limit update")
     client = docker_client()
     host_mem = host_limits()["mem_mb"]
     host_bytes = psutil.virtual_memory().total

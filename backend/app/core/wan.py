@@ -176,6 +176,9 @@ def validate(cfg: WanConfig) -> None:
 
 
 def _nmcli(*args: str, timeout: float = 30.0):
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy NetworkManager command")
     return host_run(["nmcli", *args], timeout=timeout)
 
 
@@ -198,6 +201,9 @@ def apply(cfg: WanConfig) -> dict:
     up as whichever NetworkManager picked, which is worse to debug than a
     clean failure.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy WAN apply")
     validate(cfg)
     _require_networkmanager()
 
@@ -295,6 +301,9 @@ def apply(cfg: WanConfig) -> dict:
 
 def teardown() -> dict:
     """Remove PiTun's uplink connections, returning the port to the host."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy WAN teardown")
     _nmcli("connection", "delete", _CONN_NAME)
     _nmcli("connection", "delete", f"{_CONN_NAME}-vlan")
     return {"removed": True}

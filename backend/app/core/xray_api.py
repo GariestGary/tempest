@@ -12,6 +12,9 @@ _API_ADDR = f"127.0.0.1:{settings.xray_api_port}"
 
 
 async def _run_api(*args: str) -> tuple[int, str, str]:
+    from app.core.agent_boundary import require_legacy_engine
+
+    require_legacy_engine("legacy Xray runtime API operation")
     """Run xray api command and return (rc, stdout, stderr)."""
     cmd = [settings.xray_binary, "api"] + list(args[:1]) + [f"--server={_API_ADDR}"] + list(args[1:])
     try:

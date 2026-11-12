@@ -195,6 +195,9 @@ def _docker_client():
 
 def write_conf(conf: str) -> str:
     """Write the rendered config where the container will read it."""
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy DHCP sidecar configuration")
     os.makedirs(_HOST_CONF_DIR, exist_ok=True)
     path = os.path.join(_HOST_CONF_DIR, "dnsmasq.conf")
     with open(path, "w") as f:
@@ -203,6 +206,9 @@ def write_conf(conf: str) -> str:
 
 
 def _start_sync(cfg: DhcpConfig) -> dict:
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy DHCP sidecar start")
     import docker
     from docker.errors import ImageNotFound, NotFound
 
@@ -259,6 +265,9 @@ def _start_sync(cfg: DhcpConfig) -> dict:
 
 
 def _stop_sync() -> dict:
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy DHCP sidecar stop")
     from docker.errors import NotFound
     try:
         c = _docker_client().containers.get(CONTAINER_NAME)

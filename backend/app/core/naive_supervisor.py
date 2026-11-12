@@ -98,6 +98,9 @@ class NaiveSupervisor:
 
     def start(self) -> None:
         """Non-blocking: spawns the event-loop task."""
+        from app.core.agent_boundary import require_legacy_network
+
+        require_legacy_network("legacy Docker sidecar supervisor")
         if self._task and not self._task.done():
             return
         loop = asyncio.get_event_loop()

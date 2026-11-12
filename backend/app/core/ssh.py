@@ -424,6 +424,9 @@ async def exec_remote_script(
     Cleanup: temp file on the remote is removed in a `finally` so even
     a failure / timeout doesn't leave deploy artifacts behind.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy remote SSH command")
     if not host:
         return DeployResult(ok=False, error="host is required")
     if not (private_key or password):
@@ -619,6 +622,9 @@ async def upload_file_to_remote(
     that consumes the file handles permissions in its own pass, so
     the SFTP-default 0644 is fine for the brief lifetime.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy remote SSH file upload")
     try:
         import asyncssh  # type: ignore
     except Exception as exc:  # noqa: BLE001
@@ -685,6 +691,9 @@ async def exec_remote_script_streaming(
     returned None). This lets tests pass plain `lambda` mocks
     alongside production `async def` JobManager hooks.
     """
+    from app.core.agent_boundary import require_legacy_network
+
+    require_legacy_network("legacy streaming SSH command")
     if not host:
         return DeployResult(ok=False, error="host is required")
     if not (private_key or password):
