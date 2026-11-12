@@ -30,7 +30,7 @@ nice -n 10 timeout 300 /home/gary/.local/share/tempest-tools/bin/uv pip install 
   --python backend/.venv/bin/python -r backend/requirements.txt -r backend/requirements-dev.txt
 ```
 
-From TORNADO, pass the **full local `master` HEAD SHA** to the script. The remote runner checks free disk/RAM/CPU load before touching Git, verifies a clean remote tree and expected origin, fetches `master`, requires the fetched SHA to match the requested SHA, and uses `git pull --ff-only`. It refuses a mismatch; it never resets or deletes repository files. Suites can be combined, but select only tests relevant to the changed modules:
+From TORNADO, pass the **full local `master` HEAD SHA** to the script. The runner requires a clean local tree. Remotely it checks free disk/RAM/CPU load before touching Git, verifies a clean `master` and expected origin, fetches `master`, requires the fetched SHA to match the requested SHA, then fast-forwards to that same fetched commit with Git hooks disabled. It refuses a mismatch; it never resets or deletes repository files. Suites can be combined, but select only tests relevant to the changed modules:
 
 ```powershell
 $sha = (git rev-parse HEAD).Trim()

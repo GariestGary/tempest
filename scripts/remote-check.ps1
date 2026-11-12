@@ -12,7 +12,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$RepoDir = '/home/gary/Docker/tempest'
 $Tests = @{
     Plan      = 'tests/test_network_plan_contract.py'
     Registry  = 'tests/test_network_object_registry.py'
@@ -38,13 +37,11 @@ if ($LASTEXITCODE -ne 0 -or $LocalHead -ne $Commit.ToLowerInvariant()) {
 }
 $Branch = (& $Git.Source -C $RootDir branch --show-current).Trim()
 if ($LASTEXITCODE -ne 0 -or $Branch -ne 'master') { Stop-Check 'Local branch must be master.' }
+$LocalStatus = & $Git.Source -C $RootDir status --porcelain
+if ($LASTEXITCODE -ne 0 -or $LocalStatus) { Stop-Check 'Local working tree must be clean.' }
 
 $SelectedTests = @($Suite | Select-Object -Unique | ForEach-Object { $Tests[$_] })
 if ($SelectedTests.Count -eq 0) { Stop-Check 'Select at least one suite.' }
-
-Write-Host 'Checking SSH to vortex...'
-& $Ssh.Source -o BatchMode=yes -o ConnectTimeout=10 vortex 'hostname; whoami; pwd'
-if ($LASTEXITCODE -ne 0) { Stop-Check 'SSH preflight failed; remote repository was not touched.' $LASTEXITCODE }
 
 $RemoteScript = @'
 set -euo pipefail
@@ -52,6 +49,8 @@ expected_sha=$1
 limit_seconds=$2
 shift 2
 repo=/home/gary/Docker/tempest
+
+[[ "$expected_sha" =~ ^[0-9a-f]{40}$ && "$limit_seconds" =~ ^[0-9]+$ && $# -gt 0 ]] || exit 2
 
 if [[ $(id -un) != gary || $(id -u) == 0 || ! -d /home/gary/Docker || \
       ! -d "$repo" || -L "$repo" ]]; then
@@ -102,7 +101,11 @@ if [[ "$fetched_sha" != "$expected_sha" ]]; then
     echo "Fetched master $fetched_sha differs from requested $expected_sha; no pull was attempted." >&2
     exit 7
 fi
-git pull --ff-only origin master
+if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then
+    echo 'Remote master cannot fast-forward to the requested commit; no checkout was changed.' >&2
+    exit 8
+fi
+git -c core.hooksPath=/dev/null merge --ff-only FETCH_HEAD
 tested_sha=$(git rev-parse HEAD)
 if [[ "$tested_sha" != "$expected_sha" || -n $(git status --porcelain) ]]; then
     echo 'Remote checkout differs from requested commit; tests were not started.' >&2
