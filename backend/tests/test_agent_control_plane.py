@@ -205,7 +205,7 @@ async def test_agent_mode_internal_engine_and_legacy_service_calls_fail_closed(m
     process_start.assert_not_awaited()
     docker_start.assert_not_called()
     dhcp_docker_start.assert_not_called()
-    naive_write.assert_not_awaited()
+    naive_write.assert_not_called()
     engine_lock.assert_not_awaited()
     host_open.assert_not_called()
     update_dir.assert_not_called()
