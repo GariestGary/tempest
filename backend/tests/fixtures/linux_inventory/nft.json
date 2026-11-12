@@ -1,0 +1,8 @@
+{
+  "nftables": [
+    {"metainfo": {"version": "1.0.9", "release_name": "fixture", "json_schema_version": 1}},
+    {"table": {"family": "inet", "name": "tempest-filter", "handle": 3}},
+    {"chain": {"family": "inet", "table": "tempest-filter", "name": "forward", "type": "filter", "hook": "forward", "prio": 0, "policy": "drop", "handle": 8}},
+    {"rule": {"family": "inet", "table": "tempest-filter", "chain": "forward", "handle": 12, "expr": [{"counter": {"packets": 0, "bytes": 0}}, {"drop": null}]}}
+  ]
+}

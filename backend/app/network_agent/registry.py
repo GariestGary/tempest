@@ -41,7 +41,10 @@ class ClaimKind(StrEnum):
     ROUTING_TABLE_ID = "routing_table_id"
     ROUTE_KEY = "route_key"
     FWMARK = "fwmark"
+    FWMARK_MASK = "fwmark_mask"
+    IP_RULE_MATCH = "ip_rule_match"
     INTERFACE_NAME = "interface_name"
+    INTERFACE_INDEX = "interface_index"
 
 
 _REQUIRED: dict[ObjectKind, frozenset[ClaimKind]] = {
@@ -55,6 +58,7 @@ _REQUIRED: dict[ObjectKind, frozenset[ClaimKind]] = {
     ObjectKind.TUN_INTERFACE: frozenset({ClaimKind.INTERFACE_NAME}),
     ObjectKind.MANAGED_INTERFACE: frozenset({ClaimKind.INTERFACE_NAME}),
 }
+_EXCLUSIVE_CLAIMS = frozenset(ClaimKind) - {ClaimKind.FWMARK_MASK, ClaimKind.IP_RULE_MATCH}
 _OBJECT_ID = re.compile(r"^tempest-[a-z0-9][a-z0-9_.-]{0,62}$")
 _NAMESPACE_ID = re.compile(r"^tempest-ns-[a-z0-9][a-z0-9_.-]{0,56}$")
 
@@ -67,9 +71,11 @@ class ResourceClaim:
     def __post_init__(self) -> None:
         if not isinstance(self.kind, ClaimKind) or not self.value or self.value.strip() != self.value:
             raise ValueError("resource claim must have a typed kind and nonempty canonical value")
-        if self.kind in {ClaimKind.IP_RULE_PRIORITY, ClaimKind.ROUTING_TABLE_ID, ClaimKind.FWMARK}:
-            if not re.fullmatch(r"[1-9][0-9]*", self.value) or int(self.value) > 2**32 - 1:
-                raise ValueError("numeric resource claim must be canonical and nonzero")
+        if self.kind in {ClaimKind.IP_RULE_PRIORITY, ClaimKind.ROUTING_TABLE_ID, ClaimKind.FWMARK, ClaimKind.FWMARK_MASK, ClaimKind.INTERFACE_INDEX}:
+            if not re.fullmatch(r"0|[1-9][0-9]*", self.value) or int(self.value) > 2**32 - 1:
+                raise ValueError("numeric resource claim must be canonical")
+            if self.kind in {ClaimKind.ROUTING_TABLE_ID, ClaimKind.FWMARK_MASK, ClaimKind.INTERFACE_INDEX} and self.value == "0":
+                raise ValueError("table, mask and interface index must be nonzero")
 
 
 @dataclass(frozen=True)
@@ -97,7 +103,8 @@ class NetworkObject:
         object.__setattr__(self, "claims", tuple(sorted(self.claims)))
         required = _REQUIRED[self.kind]
         kinds = {claim.kind for claim in self.claims}
-        if not required <= kinds or kinds - required:
+        optional = {ClaimKind.INTERFACE_INDEX} if self.kind in {ObjectKind.WIREGUARD_INTERFACE, ObjectKind.TUN_INTERFACE, ObjectKind.MANAGED_INTERFACE} else {ClaimKind.FWMARK_MASK, ClaimKind.IP_RULE_MATCH} if self.kind == ObjectKind.IP_RULE else frozenset()
+        if not required <= kinds or kinds - required - optional:
             raise ValueError("object has missing or unsupported resource claims")
 
 
@@ -109,6 +116,7 @@ class ObservedObject:
     claims: tuple[ResourceClaim, ...]
     fingerprint: str
     proof: str | None  # Minted and retained by Agent backend; never supplied by Control Plane.
+    kernel_key: str | None = None  # Parser-derived selectors, never an ownership claim.
 
 
 @dataclass(frozen=True)
@@ -116,6 +124,7 @@ class InventorySnapshot:
     revision: int
     complete: bool
     objects: tuple[ObservedObject, ...]
+    namespace_identity: tuple[str, int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -306,6 +315,8 @@ def _validate_inventory(
     occupied: dict[tuple[str, ResourceClaim], str] = {}
     for obj in snapshot.objects:
         for claim in obj.claims:
+            if claim.kind not in _EXCLUSIVE_CLAIMS:
+                continue
             key = (obj.namespace_id, claim)
             if key in occupied and occupied[key] != obj.object_id:
                 raise RegistryConflict("inventory has overlapping resource claims")
@@ -320,6 +331,8 @@ def _validate_inventory(
             if obj.kind != prior.kind or obj.namespace_id != prior.namespace_id or obj.claims != prior.claims:
                 raise RegistryConflict("resource identity cannot change under a stable ID")
         for claim in obj.claims:
+            if claim.kind not in _EXCLUSIVE_CLAIMS:
+                continue
             key = (obj.namespace_id, claim)
             if key in wanted and wanted[key] != obj.object_id:
                 raise RegistryConflict("desired objects claim the same resource")

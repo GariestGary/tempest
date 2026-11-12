@@ -1,6 +1,6 @@
 # NetworkPlan, NetworkAgent и IPC — задачи 2.1–2.5
 
-**Статус:** задачи 2.1–2.4 приняты владельцем; задача 2.5 `IN_PROGRESS`, [первая часть ownership registry](NETWORK_OBJECT_REGISTRY.md) готова к review. Самостоятельный AF_UNIX сервис пока исполняет только in-memory no-op/mock state machine и не меняет сеть. Control Plane в opt-in Agent mode может вызвать только типизированные validate/diff/status; mock apply не выдаётся за сетевой успех. Реестр 2.5 пока не подключён к IPC или NetworkPlan v1. ADR-001 остаётся `PROPOSED`; этап 2 `IN_PROGRESS`; задачи 2.6–2.8 не начинались.
+**Статус:** задачи 2.1–2.4 приняты владельцем; задача 2.5 `IN_PROGRESS`, [первая часть ownership registry](NETWORK_OBJECT_REGISTRY.md) принята владельцем после review `07cdc1701152d1220c02c8429009507d4ed287e4` и CI #27. Следующий read-only fixture inventory срез — `READY_FOR_REVIEW`. Самостоятельный AF_UNIX сервис пока исполняет только in-memory no-op/mock state machine и не меняет сеть. Control Plane в opt-in Agent mode может вызвать только типизированные validate/diff/status; mock apply не выдаётся за сетевой успех. Реестр 2.5 пока не подключён к IPC или NetworkPlan v1. ADR-001 остаётся `PROPOSED`; этап 2 `IN_PROGRESS`; задачи 2.6–2.8 не начинались.
 
 ## Граница полномочий
 

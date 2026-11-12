@@ -1,0 +1,4 @@
+[
+  {"family": "inet", "dst": "10.42.0.0/24", "dev": "tempest-wg0", "protocol": "static", "scope": "link", "table": 100, "metric": 20},
+  {"family": "inet", "dst": "default", "gateway": "192.0.2.1", "dev": "eth0", "table": "main", "metric": 100}
+]

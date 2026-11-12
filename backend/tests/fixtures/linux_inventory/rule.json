@@ -1,0 +1,5 @@
+[
+  {"family": "inet", "priority": 0, "src": "all", "table": "local"},
+  {"family": "inet", "priority": 100, "src": "10.42.0.0/24", "fwmark": "0x2a", "fwmask": "0xff", "table": 100},
+  {"family": "inet", "priority": 32766, "src": "all", "table": "main"}
+]

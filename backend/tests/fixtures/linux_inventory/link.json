@@ -1,0 +1,5 @@
+[
+  {"ifindex": 1, "ifname": "lo", "flags": ["LOOPBACK", "UP"], "mtu": 65536, "link_type": "loopback"},
+  {"ifindex": 7, "ifname": "tempest-wg0", "flags": ["POINTOPOINT", "UP"], "mtu": 1420, "linkinfo": {"info_kind": "wireguard"}},
+  {"ifindex": 2, "ifname": "eth0", "flags": ["BROADCAST", "UP"], "mtu": 1500, "link_type": "ether"}
+]
