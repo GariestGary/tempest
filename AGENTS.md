@@ -11,7 +11,7 @@
 - **No automatic geo-content unblocking detection.** Geo-specific routing is user-managed via explicit rules. AUTO is limited to transport-level health/failover within approved candidates.
 - **No root/host takeover from Web/API.** Do not run privileged PiTun Compose, change DNS/default routes/firewall, use host Docker socket, or modify host-wide networking while auditing.
 - **Do not touch the existing TEMPEST 2 or other services on VORTEX** unless the user separately authorizes a tested migration stage.
-- Development uses both TORNADO/Windows 11 and TYPHOON/CachyOS Linux; Linux network integration only in an isolated Linux VM/test host, never on either development host or production by default.
+- TORNADO/Windows 11 is the primary development host. TYPHOON/CachyOS remains a development host. VORTEX is authorized only as a remote, unprivileged Linux pytest runner through SSH. Real network integration remains limited to an isolated disposable Linux VM/test host, never VORTEX.
 - If uncertain about networking, protocol support, privileges, licenses or irreversible choices: inspect code, document alternatives and ask before implementation.
 - Preserve an explanation and tests for every nontrivial change; update `docs/PROJECT_SPEC.md` checkboxes and the dated progress log **only for verified work**.
 
@@ -26,6 +26,9 @@
 
 ## Local development checks
 
+- **Feedback sequence:** TORNADO editing and targeted Windows pytest → selected safe Linux pytest on VORTEX with `scripts/remote-check.ps1` at an explicit reviewed commit → independent complete GitHub CI after an authorized push → disposable isolated Linux VM only for real network experiments.
+- On VORTEX use only the allowlisted NetworkPlan, NetworkObjectRegistry, fixture-only Linux inventory, AF_UNIX/SO_PEERCRED, and Agent mode boundary tests. The runner uses `/home/gary/Docker/tempest`, its own Python 3.11 venv, temporary directories, `nice`, and a hard timeout. Check resources, origin, clean `master`, and exact SHA before testing. Do not start services, containers, dataplanes, privileged Agent, or network integration there.
+
 - **TARGETED LOCAL FEEDBACK POLICY:** after each code change, run only tests covering changed modules or behavior. Targeted pytest uses `-x` so the first failure returns quickly; do not repeat the full backend suite for small edits.
 - Full backend pytest is optional, at most once before task completion, with a hard 15-minute limit. If it reaches that limit, interrupt it and record `INCOMPLETE`, never as a pass; rely on GitHub Linux CI for the complete backend suite. Default `full` local mode means targeted backend + frontend + static checks.
 - Reuse `backend/.venv` (managed with `uv`) and `frontend/node_modules`; do not reinstall dependencies on every iteration. Match Python 3.11 and Node.js 20 with CI.
@@ -35,7 +38,7 @@
 - GitHub's Linux runner remains responsible for Linux-only checks excluded on Windows; keep those CI checks enabled.
 - Keep platform skips at individual Linux-dependent tests, never module-wide where a file also contains portable tests. Report unavailable AF_UNIX/SO_PEERCRED/systemd checks as `NOT_RUN_ON_WINDOWS` (or the corresponding OS), never as passed; all Linux-only tests must remain active in Linux CI.
 - Do not disable checks to make the workflow faster. Local checks never install dependencies, require `sudo`, start containers, or change system settings. Ordinary development does not require Docker Engine or privileged containers.
-- Docker runtime smoke and real network integration tests may run only in a pre-approved isolated Linux VM/test host. Do not run privileged Network Agent or network integration tests on TYPHOON.
+- Docker runtime smoke and real network integration tests may run only in a pre-approved isolated Linux VM/test host. Do not run privileged Network Agent or network integration tests on TYPHOON or VORTEX.
 - Stop and consult the owner before risky system changes, privileged operations, system service changes, or changes outside the workspace.
 
 ## Accepted phase 0/1 baselines

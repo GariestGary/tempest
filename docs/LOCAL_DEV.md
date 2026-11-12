@@ -2,6 +2,46 @@
 
 Use the local project environments for fast feedback. GitHub Actions remains an independent check after a push to `master`; do not wait for CI between local edits. The local check scripts never install packages, use `sudo`, start Compose, or apply network settings. Ordinary development checks do not require Docker Engine.
 
+## Feedback sequence
+
+1. Develop on TORNADO and run targeted Windows pytest for each changed behavior.
+2. At a reviewed commit, run selected safe Linux pytest on VORTEX via SSH with `scripts/remote-check.ps1`.
+3. After an authorized push, use GitHub CI as the independent complete check.
+4. Use a disposable isolated Linux VM only for real nftables, TUN, WireGuard, namespace, and rollback experiments. VORTEX is never a privileged network integration host.
+
+## VORTEX remote Linux runner
+
+VORTEX is a working production/home server. Only unprivileged tests of NetworkPlan contracts, NetworkObjectRegistry, fixture-only Linux inventory, AF_UNIX/SO_PEERCRED, and the Agent mode security boundary are allowed. Those tests were inspected for host network mutation and production-service access. AF_UNIX tests use only temporary local Unix sockets and the mock Agent; Agent mode tests mock or reject host operations. The runner does not start TEMPEST, Docker Compose, a systemd unit, or a dataplane. Do not run the full pytest suite there by default.
+
+The repository is `/home/gary/Docker/tempest` on remote `master`. Its `origin` must be `https://github.com/GariestGary/tempest.git`. First-time setup uses a clone and an isolated `backend/.venv` with Python 3.11. If Python 3.11 or `uv` is absent, install them in `/home/gary/.local/share/tempest-tools/` without `sudo`, global Python packages, or persistent PATH changes. The check script performs no dependency installation. Keep the venv between runs.
+
+The initial setup on VORTEX used these user-level commands after checking the parent directory, disk, RAM, load, and Git. Run them only when the clone or venv is missing; inspect an existing checkout and use `git pull --ff-only` instead of cloning over it:
+
+```bash
+git clone --branch master --single-branch https://github.com/GariestGary/tempest.git /home/gary/Docker/tempest
+curl -LsSf https://astral.sh/uv/install.sh | \
+  UV_INSTALL_DIR=/home/gary/.local/share/tempest-tools/bin UV_NO_MODIFY_PATH=1 sh
+UV_PYTHON_INSTALL_DIR=/home/gary/.local/share/tempest-tools/python \
+  /home/gary/.local/share/tempest-tools/bin/uv python install 3.11.18
+cd /home/gary/Docker/tempest
+UV_PYTHON_INSTALL_DIR=/home/gary/.local/share/tempest-tools/python \
+  /home/gary/.local/share/tempest-tools/bin/uv venv --python 3.11.18 backend/.venv
+nice -n 10 timeout 300 /home/gary/.local/share/tempest-tools/bin/uv pip install \
+  --python backend/.venv/bin/python -r backend/requirements.txt -r backend/requirements-dev.txt
+```
+
+From TORNADO, pass the **full local `master` HEAD SHA** to the script. The remote runner checks free disk/RAM/CPU load before touching Git, verifies a clean remote tree and expected origin, fetches `master`, requires the fetched SHA to match the requested SHA, and uses `git pull --ff-only`. It refuses a mismatch; it never resets or deletes repository files. Suites can be combined, but select only tests relevant to the changed modules:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+pwsh -File scripts/remote-check.ps1 -Commit $sha -Suite Inventory
+pwsh -File scripts/remote-check.ps1 -Commit $sha -Suite Plan,Registry,Ipc,Boundary -TimeoutSeconds 180
+```
+
+The runner uses a unique `/tmp` directory, `nice -n 10`, a remote `timeout`, and a local SSH deadline. It reports passed/failed/skipped/errors, pytest exit code, tested SHA, elapsed time, and peak RSS. Exit `124` means incomplete timeout, not a pass. Resource or SSH failures stop before Git update. The remote checkout can only test a commit already published to its `origin`; unpublished local edits are not included.
+
+Never change DNS, firewall, routes, IP rules, nftables, namespaces, existing containers or services on VORTEX; never use `sudo` for network operations, start TUN/WireGuard/Xray, or install the Agent as a service. Any resource-heavy run requires separate agreement. Real network tests remain in a disposable isolated Linux VM.
+
 ## TORNADO / Windows setup
 
 Use a user-managed Python runtime and the repository venv; do not use WindowsApps Python aliases or system `pip`. If `uv` is missing, install it without changing persistent PATH:
