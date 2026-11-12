@@ -40,6 +40,8 @@ pwsh -File scripts/remote-check.ps1 -Commit $sha -Suite Plan,Registry,Ipc,Bounda
 
 The runner uses a unique `/tmp` directory, `nice -n 10`, a remote `timeout`, and a local SSH deadline. It reports passed/failed/skipped/errors, pytest exit code, tested SHA, elapsed time, and peak RSS. Exit `124` means incomplete timeout, not a pass. Resource or SSH failures stop before Git update. The remote checkout can only test a commit already published to its `origin`; unpublished local edits are not included.
 
+**Verified 2026-11-12:** VORTEX is ready as an unprivileged Linux unit-test runner for the allowlisted suites. At `8857b19e0b63e591e4c9c6f9811c41e322130260`, the four selected IPC, NetworkPlan, Agent boundary, and fixture inventory files passed together: 90 passed, 0 failed, 0 skipped. Pytest took 6.19 s; the timed process took 12.48 s with peak RSS 129664 KiB. Preflight reported 10100148 KiB free disk, 2786812 KiB available memory, load 0.21 on 2 CPUs. This establishes the unit-test runner only; no live inventory or network integration was exercised.
+
 Never change DNS, firewall, routes, IP rules, nftables, namespaces, existing containers or services on VORTEX; never use `sudo` for network operations, start TUN/WireGuard/Xray, or install the Agent as a service. Any resource-heavy run requires separate agreement. Real network tests remain in a disposable isolated Linux VM.
 
 ## TORNADO / Windows setup
