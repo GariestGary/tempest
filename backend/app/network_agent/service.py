@@ -25,6 +25,7 @@ from .mock import MockNetworkAgent
 from .models import IPCProtocolError, MAX_IPC_MESSAGE_BYTES, parse_ipc_request
 
 LOG = logging.getLogger("tempest.network_agent")
+_UNIX_STREAM_SERVER = getattr(socketserver, "UnixStreamServer", None)
 FRAME_HEADER = struct.Struct("!I")
 DEFAULT_SOCKET = "/run/tempest-agent/control.sock"
 MAX_REPLAY_ENTRIES = 4096
@@ -117,7 +118,7 @@ def write_frame(connection: socket.socket, payload: bytes) -> None:
     connection.sendall(FRAME_HEADER.pack(len(payload)) + payload)
 
 
-class AgentServer(socketserver.UnixStreamServer):
+class AgentServer(_UNIX_STREAM_SERVER or socketserver.TCPServer):
     """Single-threaded listener serializes clients and state transitions."""
 
     allow_reuse_address = False
@@ -133,6 +134,8 @@ class AgentServer(socketserver.UnixStreamServer):
         io_timeout_seconds: float = 2.0,
         replay_guard: ReplayGuard | None = None,
     ) -> None:
+        if _UNIX_STREAM_SERVER is None or not hasattr(socket, "SO_PEERCRED"):
+            raise RuntimeError("Network Agent IPC requires Linux AF_UNIX and SO_PEERCRED")
         self.agent = agent
         self.peer_policy = peer_policy
         self.io_timeout_seconds = io_timeout_seconds

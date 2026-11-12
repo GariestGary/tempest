@@ -8,12 +8,13 @@ MODE="${1:-quick}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local-check.sh [quick|backend|frontend|full]
+Usage: scripts/local-check.sh [quick|backend|backend-full|frontend|full]
 
   quick     Current Network Agent / NetworkPlan contract tests
-  backend   Complete backend pytest suite
+  backend   Targeted pytest for changed backend modules (stops at first failure)
+  backend-full  Optional full backend pytest, once only, hard-limited to 15 minutes
   frontend  Vitest, ESLint, and TypeScript/Vite production build
-  full      Backend + frontend + shell syntax + diff check + optional Compose config
+  full      Targeted backend + frontend + static checks; full backend belongs in Linux CI
 EOF
 }
 
@@ -43,15 +44,44 @@ require_frontend() {
   [[ -x "$FRONTEND_DIR/node_modules/.bin/eslint" ]] || fail "ESLint is missing from frontend/node_modules; run npm ci --legacy-peer-deps in frontend/"
 }
 
-run_backend() {
+run_backend_targeted() {
   require_backend
-  (cd "$BACKEND_DIR" && run_timed "Backend pytest suite" .venv/bin/python -m pytest tests/ -q)
+  (cd "$BACKEND_DIR" && run_timed "Targeted backend pytest (first failure stops run)" \
+    .venv/bin/python -m pytest -x -q -rs \
+      tests/test_network_agent_ipc.py \
+      tests/test_network_plan_contract.py \
+      tests/test_agent_control_plane.py \
+      tests/test_network_plan_builder.py \
+      tests/test_agent_compose_isolation.py \
+      tests/test_install_script.py \
+      tests/test_update_script.py)
+}
+
+run_backend_full_once() {
+  require_backend
+  (cd "$BACKEND_DIR" && run_timed "Optional full backend pytest (15 minute hard limit)" \
+    .venv/bin/python -c 'import os,signal,subprocess,sys
+cmd=[sys.executable,"-m","pytest","tests/","-q","-rs"]
+p=subprocess.Popen(cmd,start_new_session=True)
+try:
+    raise SystemExit(p.wait(timeout=900))
+except subprocess.TimeoutExpired:
+    os.killpg(p.pid,signal.SIGTERM)
+    try:
+        p.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid,signal.SIGKILL)
+    print("BACKEND_PYTEST_FULL: INCOMPLETE (15 minute timeout)",file=sys.stderr)
+    raise SystemExit(124)')
 }
 
 run_quick() {
   require_backend
   (cd "$BACKEND_DIR" && run_timed "Network Agent / NetworkPlan contract tests" \
-    .venv/bin/python -m pytest tests/test_network_agent_ipc.py tests/test_network_plan_contract.py tests/test_agent_control_plane.py tests/test_network_plan_builder.py -q)
+    .venv/bin/python -m pytest -x -q \
+      tests/test_network_agent_ipc.py tests/test_network_plan_contract.py \
+      tests/test_agent_control_plane.py tests/test_network_plan_builder.py \
+      tests/test_agent_compose_isolation.py)
 }
 
 run_frontend() {
@@ -77,10 +107,11 @@ run_compose_config() {
 
 case "$MODE" in
   quick) run_quick ;;
-  backend) run_backend ;;
+  backend) run_backend_targeted ;;
+  backend-full) run_backend_full_once ;;
   frontend) run_frontend ;;
   full)
-    run_backend || exit $?
+    run_backend_targeted || exit $?
     run_frontend || exit $?
     run_shell_syntax || exit $?
     run_timed "Git whitespace/error check" git -C "$ROOT_DIR" diff --check || exit $?

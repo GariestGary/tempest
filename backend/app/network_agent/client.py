@@ -48,6 +48,8 @@ class NetworkAgentClient:
         self._timeout = timeout
 
     async def _call(self, request: ValidateRequest | DiffRequest | ReadStatusRequest) -> IPCResponse:
+        if not hasattr(asyncio, "open_unix_connection"):
+            raise NetworkAgentUnavailable("Network Agent AF_UNIX IPC is unsupported on this platform")
         payload = request.model_dump_json().encode("utf-8")
         if len(payload) > MAX_IPC_MESSAGE_BYTES:
             raise NetworkAgentUnavailable("NetworkPlan exceeds the IPC frame limit")

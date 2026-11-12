@@ -5,7 +5,7 @@
 ## Current instructions
 
 - Product name: **TEMPEST** (no version suffix). Fork base: `DaveBugg/PiTun` (`master`, BSD-3-Clause).
-- **Phase 1: `ACCEPTED` by the owner on 2026-11-10**, based on successful GitHub Actions [run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332) at commit `38fec1220c250b3b398e9160842e301d92d9d356`. **Current phase: PHASE 2 (`IN_PROGRESS`); tasks 2.1 and 2.2 are `ACCEPTED`; task 2.3 is `IN_PROGRESS`.** Only task 2.3 is authorized; do not start tasks 2.4–2.8 or phase 3, and do not mark phase 2 accepted before Gate 2 and owner review.
+- **Phase 1: `ACCEPTED` by the owner on 2026-11-10**, based on successful GitHub Actions [run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332) at commit `38fec1220c250b3b398e9160842e301d92d9d356`. **Current phase: PHASE 2 (`IN_PROGRESS`); tasks 2.1–2.3 are `ACCEPTED`; task 2.4 is authorized.** Work only on task 2.4. Do not start tasks 2.5–2.8 or phase 3, and do not mark phase 2 accepted before Gate 2 and owner review.
 - **Git workflow:** `master` is the only working branch. Make changes directly on `master`; do not create feature branches or Pull Requests unless the user asks for them separately.
 - Reuse PiTun architecture/tests and preserve upstream history/license. Do not rewrite the backend in .NET.
 - **No automatic geo-content unblocking detection.** Geo-specific routing is user-managed via explicit rules. AUTO is limited to transport-level health/failover within approved candidates.
@@ -26,15 +26,18 @@
 
 ## Local development checks
 
-- Run relevant local tests first after each code change; do not wait for GitHub Actions between local iterations.
-- Reuse `backend/.venv` (managed with `uv`) and `frontend/node_modules`; do not reinstall dependencies on every iteration.
-- Run frontend checks with Node.js 20 to match CI; the current TYPHOON Node.js 26 runtime causes jsdom localStorage test failures.
-- Run the full local suite before finishing a substantial task or phase. Use `scripts/local-check.sh quick|backend|frontend|full` as documented in [docs/LOCAL_DEV.md](docs/LOCAL_DEV.md).
-- GitHub Actions remains an independent check after an authorized push to `master`. A published commit with failed CI blocks further publication until the failure is understood and fixed.
-- Do not disable checks to make the workflow faster. Local checks never install dependencies or require `sudo`.
+- **TARGETED LOCAL FEEDBACK POLICY:** after each code change, run only tests covering changed modules or behavior. Targeted pytest uses `-x` so the first failure returns quickly; do not repeat the full backend suite for small edits.
+- Full backend pytest is optional, at most once before task completion, with a hard 15-minute limit. If it reaches that limit, interrupt it and record `INCOMPLETE`, never as a pass; rely on GitHub Linux CI for the complete backend suite. Default `full` local mode means targeted backend + frontend + static checks.
+- Reuse `backend/.venv` (managed with `uv`) and `frontend/node_modules`; do not reinstall dependencies on every iteration. Match Python 3.11 and Node.js 20 with CI.
+- Detect the current OS. On Windows use `scripts/local-check.ps1`; on Linux use `scripts/local-check.sh`. Never use a Windows venv in Linux or a Linux venv in Windows.
+- Report Linux-only AF_UNIX/SO_PEERCRED/systemd checks that cannot run on this OS as `NOT_RUN_ON_WINDOWS` (or the corresponding OS); never count them as passed. `full` must print every platform-specific exclusion.
+- GitHub Actions provides the complete Linux compatibility check after an authorized push. It is not an intermediate edit/test loop and should not be triggered after each local edit. A published commit with failed CI blocks further publication until the cause is understood and fixed.
+- GitHub's Linux runner remains responsible for Linux-only checks excluded on Windows; keep those CI checks enabled.
+- Keep platform skips at individual Linux-dependent tests, never module-wide where a file also contains portable tests. Report unavailable AF_UNIX/SO_PEERCRED/systemd checks as `NOT_RUN_ON_WINDOWS` (or the corresponding OS), never as passed; all Linux-only tests must remain active in Linux CI.
+- Do not disable checks to make the workflow faster. Local checks never install dependencies, require `sudo`, start containers, or change system settings. Ordinary development does not require Docker Engine or privileged containers.
 - Docker runtime smoke and real network integration tests may run only in a pre-approved isolated Linux VM/test host. Do not run privileged Network Agent or network integration tests on TYPHOON.
 - Stop and consult the owner before risky system changes, privileged operations, system service changes, or changes outside the workspace.
 
 ## Accepted phase 0/1 baselines
 
-The baseline SHA, host-operation audit, feature gap matrix, and proposed ADR-001 are recorded in `docs/`. Phase 0 and phase 1 are accepted. Gate 1 evidence is recorded in `docs/STATUS.md` and the Actions run above. Task 2.1 was accepted after review of `be061d953c52e25da8338d545d117fdbb1d9da24` and successful CI run #10. The owner accepted task 2.2 after reviewing `91fb2c63a5204b1a16fb960a718108aae5e4d3e9` and successful CI. Task 2.3 is authorized and in progress; do **not** start tasks 2.4–2.8, implement real nftables/WireGuard apply, deploy on VORTEX, or move beyond task 2.3 without separate user confirmation. ADR-001 remains `PROPOSED` until Linux architecture experiments are reviewed.
+The baseline SHA, host-operation audit, feature gap matrix, and proposed ADR-001 are recorded in `docs/`. Phase 0 and phase 1 are accepted. Gate 1 evidence is recorded in `docs/STATUS.md` and the Actions run above. Task 2.1 was accepted after review of `be061d953c52e25da8338d545d117fdbb1d9da24` and successful CI run #10. Task 2.2 was accepted after review of `91fb2c63a5204b1a16fb960a718108aae5e4d3e9` and successful CI. The owner accepted task 2.3 after review of `2751d160b4a1cc197d5d2c92a81e8451d0bdd482` and successful CI run #24. Task 2.4 is the only authorized task; do **not** start tasks 2.5–2.8, implement real nftables/WireGuard apply, deploy on VORTEX, or move beyond task 2.4 without separate user confirmation. ADR-001 remains `PROPOSED` until Linux architecture experiments are reviewed.

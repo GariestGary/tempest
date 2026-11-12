@@ -1,5 +1,15 @@
 # TEMPEST — статус форка
 
+## 2026-11-12 · этап 2, задача 2.4 — READY_FOR_REVIEW
+
+Добавлена отдельная Agent Compose конфигурация с non-root UID, `cap_drop: ALL`, read-only root filesystem, отсутствием privileged/host network/host PID/devices/Docker socket и системных host mounts; backend image получил непривилегированный `agent` target. Штатный `docker-compose.yml` явно задаёт `CONTROL_PLANE_MODE=legacy`, чтобы `.env` не включал Agent mode. Static audit проверяет Compose/Dockerfile ограничения и отказ неподдержанного IPC transport. Agent и Compose runtime не запускались.
+
+Обновлены `AGENTS.md`, `AUTOPILOT_POLICY.md`, `LOCAL_DEV.md` и local-check scripts: по умолчанию targeted pytest с `-x`; полный backend запуск необязателен, максимум один раз, hard timeout 15 минут; прерванный прогон фиксируется как `INCOMPLETE`, полную Linux suite проверяет CI. Module-wide Windows skips убраны из installer/updater tests: Windows пропускает только Bash subprocess cases при отсутствии рабочего Bash, а portable source assertions остаются runnable. AF_UNIX/SO_PEERCRED suite помечен Linux-only; Ubuntu backend CI запускает `pytest tests/` целиком.
+
+Проверки: targeted backend `68 passed, 71 skipped` (Linux AF_UNIX и отсутствующий рабочий Bash — пропуски, не успешные прогоны); frontend `142 passed`, ESLint и build успешны; Agent Compose config, PowerShell parser, `git diff --check` успешны. Полный Windows backend pytest остановлен после превышения 15 минут примерно на 39%: **INCOMPLETE**. Bash `-n` на Windows не запускался. Gate 2 и этап 2 не приняты; задача ожидает ревью владельца.
+
+На TORNADO/VORTEX не выполнялись Docker runtime, Agent service, privileged операции, сетевые изменения, nftables/WireGuard/TUN, DNS/routes/firewall или deploy. Runtime capability mask и UID/GID/socket mapping остаются непроверенными; ADR-001 остаётся `PROPOSED`.
+
 ## 2026-11-10 · этап 0
 
 **ACCEPTED пользователем.**

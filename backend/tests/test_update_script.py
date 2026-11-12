@@ -4,7 +4,6 @@ The script is sourceable (`main` runs only when executed directly), so we
 can call its functions in isolation with stubbed `curl`/`docker` on PATH.
 Skipped where bash is unavailable.
 """
-import os
 import shutil
 import subprocess
 import textwrap
@@ -14,9 +13,17 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "pitun-update.sh"
 BASH = shutil.which("bash")
+BASH_USABLE = False
+if BASH is not None:
+    try:
+        BASH_USABLE = subprocess.run(
+            [BASH, "--version"], capture_output=True, timeout=3
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
-pytestmark = pytest.mark.skipif(
-    BASH is None or not SCRIPT.exists(), reason="bash or script unavailable",
+requires_bash = pytest.mark.skipif(
+    not BASH_USABLE, reason="Bash integration requires a working Bash executable"
 )
 
 
@@ -38,6 +45,7 @@ def stub(dirpath: Path, name: str, body: str) -> None:
     p.chmod(0o755)
 
 
+@requires_bash
 class TestSyntax:
     def test_script_parses(self):
         assert subprocess.run([BASH, "-n", str(SCRIPT)]).returncode == 0
@@ -49,6 +57,7 @@ class TestSyntax:
         assert "Network path" not in res.stdout
 
 
+@requires_bash
 class TestVersionComparison:
     @pytest.mark.parametrize(("newer", "older"), [
         ("v1.4.8", "1.4.7"),
@@ -75,6 +84,7 @@ class TestVersionComparison:
         assert "NO" in res.stdout, f"{a} must not count as newer than {b}"
 
 
+@requires_bash
 class TestNetworkPath:
     """The box TPROXYs its own traffic, so the updater must prove it has a
     usable path before touching anything — and must not brick itself when
@@ -150,6 +160,7 @@ class TestNetworkPath:
         assert "Kill switch is ARMED" in res.stdout
 
 
+@requires_bash
 class TestVersionDiscovery:
     def test_running_version_parsed_from_health(self, tmp_path):
         d = tmp_path / "bin"
@@ -179,6 +190,7 @@ class TestVersionDiscovery:
         assert res.stdout.strip() == "v1.5.0-beta.1"
 
 
+@requires_bash
 class TestStatusFile:
     """The UI polls a file, not a stream: the update restarts the backend,
     so any connection would die exactly when the user most wants to know
@@ -226,6 +238,7 @@ class TestStatusFile:
         assert json.loads(status.read_text())["ok"] is True
 
 
+@requires_bash
 class TestProgressMapping:
     """install.sh announces phases as `[STEP] …`; the updater turns those
     into a coarse percentage. Coarse on purpose — phases are what the
@@ -246,6 +259,7 @@ class TestProgressMapping:
         assert res.stdout.strip() == ""
 
 
+@requires_bash
 class TestImageCleanup:
     """Every update loads `pitun-backend:vX.Y.Z` and retags `:latest`,
     leaving the old tag behind. On a 32 GB card a few of those matter."""
@@ -296,6 +310,7 @@ class TestImageCleanup:
         assert not removed.exists(), "only PiTun's own images are ours to delete"
 
 
+@requires_bash
 class TestAgentRequest:
     """The backend can't restart itself, so the UI drops a request file
     and a host-side systemd path unit picks it up."""
@@ -350,6 +365,7 @@ class TestAgentRequest:
         assert res.returncode == 0
 
 
+@requires_bash
 class TestSnapshotRetention:
     """`install.sh` snapshots the DB before every upgrade and never
     removes it, so they accumulate one per update forever. We prune —
@@ -438,12 +454,13 @@ class TestSnapshotRetention:
         )
 
 
+@requires_bash
 def test_the_daily_check_does_not_overwrite_a_requested_update():
     """With a request waiting, a --check run must not write idle/available over it."""
     import subprocess, tempfile, pathlib, shutil
     bash = shutil.which("bash")
-    if not bash:
-        pytest.skip("bash not available")
+    if not BASH_USABLE:
+        pytest.skip("Bash integration requires a working Bash executable")
     script = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "pitun-update.sh"
     with tempfile.TemporaryDirectory() as d:
         d = pathlib.Path(d)
@@ -461,8 +478,8 @@ def test_the_daily_check_does_not_overwrite_a_requested_update():
 
 def _bash_out(code: str) -> str:
     bash = shutil.which("bash")
-    if not bash:
-        pytest.skip("bash not available")
+    if not BASH_USABLE or not bash:
+        pytest.skip("Bash integration requires a working Bash executable")
     script = Path(__file__).resolve().parents[2] / "scripts" / "pitun-update.sh"
     r = subprocess.run(
         [bash, "-c", f'source "{script.as_posix()}"; {code}'],
@@ -471,6 +488,7 @@ def _bash_out(code: str) -> str:
     return r.stdout.decode("utf-8")
 
 
+@requires_bash
 def test_json_str_drops_colour_codes_and_control_bytes():
     import json
     out = _bash_out(r'json_str "$(printf "\033[0;34m[STEP]\033[0m  Preparing host\001")"')

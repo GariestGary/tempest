@@ -140,3 +140,11 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 FROM dev AS dev-safe
 RUN mkdir -p /tmp/tempest /app/data && chown -R 10001:10001 /tmp/tempest /app/data
 USER 10001:10001
+
+# Agent-mode Control Plane image. It uses the production dependency set and
+# runs as an unprivileged UID; the agent Compose file supplies a read-only
+# root filesystem, drops all capabilities, and mounts only the narrow IPC
+# socket plus its own database volume.
+FROM production AS agent
+RUN mkdir -p /tmp/tempest /app/data && chown -R 10001:10001 /tmp/tempest /app/data
+USER 10001:10001

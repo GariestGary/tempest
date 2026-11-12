@@ -5,7 +5,6 @@ comparison is lifted out of the file itself and evaluated, rather than a copy
 of it being retyped here. A test that agrees with a paraphrase of the code
 would have passed while the shipped comparison was wrong.
 """
-import os
 import re
 import shutil
 import subprocess
@@ -15,9 +14,17 @@ import pytest
 
 INSTALL_SH = Path(__file__).resolve().parents[2] / "install.sh"
 BASH = shutil.which("bash")
+BASH_USABLE = False
+if BASH is not None:
+    try:
+        BASH_USABLE = subprocess.run(
+            [BASH, "--version"], capture_output=True, timeout=3
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
-pytestmark = pytest.mark.skipif(
-    BASH is None or not INSTALL_SH.exists(), reason="bash or install.sh unavailable",
+requires_bash = pytest.mark.skipif(
+    not BASH_USABLE, reason="Bash integration requires a working Bash executable"
 )
 
 
@@ -51,6 +58,7 @@ fi
     return r.stdout.strip() == "DOWNGRADE"
 
 
+@requires_bash
 class TestDowngradeDetection:
     def test_beta_to_its_own_release_is_an_upgrade(self):
         """The single most common upgrade there is, and it was refused:
@@ -103,6 +111,7 @@ class TestUpdateAgentIsInstalled:
         assert active == []
 
 
+@requires_bash
 class TestDnsPortWarning:
     """On an upgrade, xray is exactly what holds UDP/5353 — it IS PiTun's
     DNS. Warning about that told every operator of a healthy box that their

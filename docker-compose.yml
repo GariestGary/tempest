@@ -73,6 +73,9 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=sqlite:////app/data/pitun.db
+      # Keep the compatibility stack pinned to legacy mode. Agent mode must
+      # use docker-compose.agent.yml, which has a separate unprivileged API.
+      - CONTROL_PLANE_MODE=legacy
       # Docker API endpoint used by NaiveManager. Default = direct socket.
       # Set to tcp://127.0.0.1:2375 to route through docker-proxy (secure profile).
       - DOCKER_HOST=unix:///var/run/docker.sock
