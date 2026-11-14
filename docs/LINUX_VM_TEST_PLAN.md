@@ -1,6 +1,6 @@
 # Task 2.5 — isolated Linux VM test plan
 
-**Status (2026-11-14):** the first VM-only read-only inventory trial, a live namespace-identity mismatch check, and an offline replay of the real capture passed. These establish repeatable collection and fail-closed parsing/conflict behavior only. They do not establish atomicity, ownership, Agent systemd sandboxing, durable receipts, real apply/rollback, or ownership enforcement on changed kernel objects. Task 2.5 remains `IN_PROGRESS`; any VM test that creates network objects requires separate explicit owner authorization. ADR-001 remains `PROPOSED`; Gate 2 is open.
+**Status (2026-11-14):** the first VM-only read-only inventory trial, a live namespace-identity mismatch check, and an offline replay of the real capture passed. These establish repeatable collection and fail-closed parsing/conflict behavior only. They do not establish atomicity, ownership, Agent systemd sandboxing, durable receipts, real apply/rollback, or ownership enforcement on changed kernel objects. The owner explicitly authorized the one foreign-object experiment below for `tempest-ns-lab`; it has **not run** in this session because the current sandbox could not reach the TYPHOON SSH proxy (`Operation not permitted` to `127.0.0.1:2222`) and denied local network-namespace inspection. Re-run all VM/snapshot/console preflights before using the authorization. Task 2.5 remains `IN_PROGRESS`; ADR-001 remains `PROPOSED`; Gate 2 is open.
 
 ## VM and evidence boundary
 
