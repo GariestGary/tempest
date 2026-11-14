@@ -1,6 +1,6 @@
 # Task 2.5 — isolated Linux VM test plan
 
-**Status:** read-only collector prepared for review; VM not created and no live capture executed. Read-only trials require an operator-prepared disposable VM. Network-changing trials require a separate explicit owner authorization. ADR-001 remains `PROPOSED`; Gate 2 is open.
+**Status (2026-11-14):** the first VM-only read-only inventory trial passed on a disposable Ubuntu VM. The trial establishes repeatable collection and host-namespace refusal only. It does not establish atomicity, ownership, Agent systemd sandboxing, durable receipts, real apply/rollback, or ownership enforcement on changed kernel objects. Task 2.5 remains `IN_PROGRESS`; network-changing trials require separate explicit owner authorization. ADR-001 remains `PROPOSED`; Gate 2 is open.
 
 ## VM and evidence boundary
 
@@ -26,6 +26,33 @@ ip netns exec tempest-ns-lab .venv/bin/python -m app.network_agent.linux_invento
 ```
 
 Run the Python module from the repository's `backend` directory using its Python 3.11 environment, with operator-controlled `ip netns exec`. Entering a namespace and reading nftables may require elevated operator privileges even though the commands only read state. Record the actual UID and capability masks for this capture separately from the proposed empty-capability Agent service; do not grant the Agent capabilities merely to make this trial pass. If the read-only profile cannot enumerate nftables, record a failed/incomplete inventory and review a separate VM-only collection identity. The collector itself neither enters nor creates a namespace. It only resolves `ip` and `nft` from fixed system paths and invokes `ip -j link`, separate `ip -4/-6 -j rule`, separate `ip -4/-6 -j route show table all`, and `nft -j list ruleset` without a shell. Each command has a ten-second timeout; nonzero exit, stderr, empty output, invalid UTF-8, oversized feed, parse error or changed identity fails the whole capture. A successful run creates a new mode-0700 evidence directory containing six mode-0600 raw JSON feeds and `manifest.json` with exact command, timestamps, digests and `ownership_proof: false`. Treat a directory without a complete manifest as failed evidence. Raw inventory can reveal addresses and rules: keep it private and redact copies shared for review. The operator must record PID/start time separately. If the prepared namespace disappears and its inode is later reused, discard the capture.
+
+## Recorded trial — 2026-11-14
+
+The operator ran the read-only trial in disposable VM `tempest-lab-ubuntu`, under QEMU/KVM on TYPHOON. The VM ran Ubuntu 26.04.1 LTS, kernel `7.0.0-43-generic`, and Python 3.11.18. The tested checkout was `33bd5d79203537edb4854216b5bf621c00466464`. A QCOW2 backup was created and verified before the trial; `qemu-img check` reported no errors. No VORTEX or TYPHOON host network settings were changed.
+
+The prepared target was `tempest-ns-lab`. Its network namespace identity was device 5, inode 4026532548; the Ubuntu main namespace was device 5, inode 4026531833. They differed as expected. The main namespace exposed `lo` and `enp1s0`; the lab namespace exposed only `lo`.
+
+Two live collector runs each completed with six unproven objects. The six raw JSON feeds from the two runs were byte-for-byte identical; namespace identity and inventory revision also matched. Both manifests recorded `atomic: false` and `ownership_proof: false`. These results show repeatable read-only output for this prepared VM state. They do not prove an atomic cross-command snapshot, object creation continuity, or ownership.
+
+A negative collector invocation using the main namespace and name `tempest-ns-host-check` failed with `capture failed: target is the host namespace`, exit code 1, and created no evidence directory. The operator did not run any network-changing operation. The automated suite already covered the identity guard; a CLI regression also checks exit code 1 and absence of the output directory.
+
+### Confirmed facts and remaining unknowns
+
+Confirmed by this trial: the collector ran in the prepared disposable VM; the target namespace differed from the main namespace; two captures produced identical six-feed bytes, identity and revision; each returned six unproven observations; both manifests denied atomicity and ownership proof; the collector refused the main namespace before creating evidence.
+
+Still unverified: runtime Agent systemd sandbox enforcement and effective capability masks; durable ownership receipts and restart recovery; real nftables, route, `ip rule`, TUN or WireGuard apply/rollback; and ownership enforcement on network objects changed by TEMPEST. No such objects were created or changed during this trial. The trial does not accept task 2.5, Gate 2, or ADR-001.
+
+## Next minimal non-mutating trial
+
+Keep the same disposable-VM, snapshot, console and private-evidence controls. Do not create or modify nftables, routes, `ip rule`, fwmark, TUN or WireGuard objects. Use the live inventory only as observations, which remain unproven:
+
+1. Capture the prepared target and record identity/revision. Select existing observations as foreign inputs; do not infer ownership from names, handles, marks, IDs or matching fingerprints.
+2. Run a deliberately mismatched expected boot ID and a deliberately mismatched namespace device/inode against the collector. Each must fail closed before any evidence directory is created.
+3. Feed a copied snapshot with a changed fingerprint/revision into the fixture-level registry/plan checks. Verify drift is reported and no proof is assigned. Use an observed foreign claim as a collision input and verify a desired object requesting that claim is rejected without adoption.
+4. Capture the real target again and compare its six feeds and identity to the initial capture. Record that this scenario made no network changes.
+
+This is a read-only check of identity rejection, foreign-claim conflict and unproven drift handling. It does not test enforcement during mutation or recovery after a real object was changed; those require a separately authorized network-changing experiment. Do not start task 2.6 as part of this plan.
 
 ## Read-only trial, after VM preparation
 

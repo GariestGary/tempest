@@ -1,5 +1,17 @@
 # TEMPEST — статус форка
 
+## 2026-11-14 · этап 2, задача 2.5 — первый VM-only read-only inventory trial
+
+Испытание прошло на disposable Ubuntu VM `tempest-lab-ubuntu` под QEMU/KVM на TYPHOON: Ubuntu 26.04.1 LTS, kernel `7.0.0-43-generic`, Python 3.11.18, checkout `33bd5d79203537edb4854216b5bf621c00466464`. Резервная копия QCOW2 создана заранее; `qemu-img check` завершился без ошибок. Host networking TYPHOON и VORTEX не менялись.
+
+Namespace `tempest-ns-lab` имел identity device 5/inode 4026532548; основной namespace Ubuntu — device 5/inode 4026531833. У основного namespace видны `lo`, `enp1s0`, у lab namespace — только `lo`. Два запуска read-only collector выдали по шесть unproven objects; все шесть raw feeds совпали побайтово, identity и inventory revision совпали. Оба manifest явно содержали `atomic: false` и `ownership_proof: false`.
+
+Отрицательный запуск против основного namespace с именем `tempest-ns-host-check` завершился `capture failed: target is the host namespace`, exit code 1; evidence directory не создан. В `test_linux_inventory.py` guard уже проверялся на unit-уровне; добавлен CLI regression для exit code и отсутствия evidence output.
+
+На VM целевые `test_linux_inventory.py` и `test_network_object_registry.py`: **58 passed, 3 warnings**. Испытание подтверждает только повторяемый read-only inventory и отказ захвата host namespace. Оно не проверяло Agent systemd sandbox/effective capabilities, durable receipts, реальный apply/rollback или ownership enforcement на изменённых сетевых объектах. Такие объекты не создавались и не менялись.
+
+Задача 2.5 остаётся `IN_PROGRESS`; Gate 2 не принят, ADR-001 остаётся `PROPOSED`. Минимальный следующий non-mutating сценарий (неверная namespace identity, конфликт desired claim с существующим foreign observation, drift на копии снимка, повторный read-only capture) записан в [плане Linux VM](LINUX_VM_TEST_PLAN.md). Реальные сетевые изменения не входят в него.
+
 ## 2026-11-12 · этап 2, задача 2.5 — первая часть READY_FOR_REVIEW
 
 Кодовый коммит: `e9f1f449f7ed3c8f6d85ab1d495f77ceb401771b`.

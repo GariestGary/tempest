@@ -387,6 +387,29 @@ def test_collector_rejects_host_namespace(monkeypatch):
         collector._check_identity(NAMESPACE)
 
 
+def test_cli_host_namespace_refusal_exits_without_evidence(monkeypatch, tmp_path, capsys):
+    output = tmp_path / "host-capture"
+    monkeypatch.setattr(collector.sys, "platform", "linux")
+    monkeypatch.setattr(collector.sys, "argv", [
+        "linux_inventory_capture", "--name", "tempest-ns-host-check",
+        "--boot-id", NAMESPACE.boot_id,
+        "--netns-device", str(NAMESPACE.netns_device),
+        "--netns-inode", str(NAMESPACE.netns_inode),
+        "--output-dir", str(output),
+    ])
+
+    def reject_host_namespace(_expected):
+        raise InventoryError("target is the host namespace")
+
+    monkeypatch.setattr(collector, "_check_identity", reject_host_namespace)
+    with pytest.raises(SystemExit) as error:
+        collector.main()
+
+    assert error.value.code == 1
+    assert "capture failed: target is the host namespace" in capsys.readouterr().err
+    assert not output.exists()
+
+
 @pytest.mark.parametrize("error", [OSError("no binary"), subprocess.TimeoutExpired("ip", 10)])
 def test_collector_rejects_process_failure(monkeypatch, error):
     called, _ = _mock_capture(monkeypatch)
