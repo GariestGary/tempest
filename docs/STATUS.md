@@ -1,5 +1,19 @@
 # TEMPEST — статус форка
 
+## 2026-11-14 · этап 2, задача 2.5 — identity mismatch и offline replay
+
+В той же disposable Ubuntu VM collector был запущен в `tempest-ns-lab` с ожидаемым inode `NS_INO + 1`. Результат: `capture failed: target namespace identity changed`, exit code 1; каталог evidence не создан. Это отдельная live read-only проверка identity mismatch.
+
+Затем без добавления capture в репозиторий выполнен offline replay приватных данных `/tmp/tempest-capture-1`. SHA-256 всех шести feeds совпали с manifest. Желаемый `MANAGED_INTERFACE` с именем `lo` и fingerprint существующего unproven observation отклонён с `desired resource collides with unproven observation`. В копии JSON только в памяти MTU `lo` изменён: object ID сохранился, fingerprint и inventory revision изменились, proof остался `None`; сценарий завершился `All offline checks passed`.
+
+Ранее существовали parser-level тесты identity mismatch, foreign collisions и drift; теперь добавлены точные регрессии на CLI identity-mismatch отказ и отсутствие evidence, отказ принять `lo` при совпадающем fingerprint, MTU drift с сохранением ID/обновлением fingerprint и revision без proof, а также соответствие SHA-256 записанных feeds их manifest. Raw capture, адреса и ключи в git не добавлялись.
+
+Локальная targeted команда `backend/.venv/bin/python -m pytest -x -q backend/tests/test_linux_inventory.py backend/tests/test_network_object_registry.py`: **62 passed, 3 warnings**; `git diff --check` — pass. Полный backend suite оставлен GitHub Actions.
+
+Следующий VM-only foreign-object эксперимент для nftables, `ip rule` и routes описан в [плане](LINUX_VM_TEST_PLAN.md): с уникальными claims, проверкой отсутствия конфликтов в target и main namespace до seed и точным обратным удалением только созданных объектов. План не запускался; никакие реальные сетевые объекты не создавались.
+
+Task 2.5 остаётся `IN_PROGRESS`; Gate 2 открыт, ADR-001 — `PROPOSED`. Live Agent sandbox/capability enforcement, durable receipts/restart recovery, реальный TEMPEST apply/rollback и ownership enforcement на изменённых kernel objects не проверялись.
+
 ## 2026-11-14 · этап 2, задача 2.5 — первый VM-only read-only inventory trial
 
 Испытание прошло на disposable Ubuntu VM `tempest-lab-ubuntu` под QEMU/KVM на TYPHOON: Ubuntu 26.04.1 LTS, kernel `7.0.0-43-generic`, Python 3.11.18, checkout `33bd5d79203537edb4854216b5bf621c00466464`. Резервная копия QCOW2 создана заранее; `qemu-img check` завершился без ошибок. Host networking TYPHOON и VORTEX не менялись.

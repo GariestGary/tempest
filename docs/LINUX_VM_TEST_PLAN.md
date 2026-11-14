@@ -1,6 +1,6 @@
 # Task 2.5 — isolated Linux VM test plan
 
-**Status (2026-11-14):** the first VM-only read-only inventory trial passed on a disposable Ubuntu VM. The trial establishes repeatable collection and host-namespace refusal only. It does not establish atomicity, ownership, Agent systemd sandboxing, durable receipts, real apply/rollback, or ownership enforcement on changed kernel objects. Task 2.5 remains `IN_PROGRESS`; network-changing trials require separate explicit owner authorization. ADR-001 remains `PROPOSED`; Gate 2 is open.
+**Status (2026-11-14):** the first VM-only read-only inventory trial, a live namespace-identity mismatch check, and an offline replay of the real capture passed. These establish repeatable collection and fail-closed parsing/conflict behavior only. They do not establish atomicity, ownership, Agent systemd sandboxing, durable receipts, real apply/rollback, or ownership enforcement on changed kernel objects. Task 2.5 remains `IN_PROGRESS`; any VM test that creates network objects requires separate explicit owner authorization. ADR-001 remains `PROPOSED`; Gate 2 is open.
 
 ## VM and evidence boundary
 
@@ -37,22 +37,38 @@ Two live collector runs each completed with six unproven objects. The six raw JS
 
 A negative collector invocation using the main namespace and name `tempest-ns-host-check` failed with `capture failed: target is the host namespace`, exit code 1, and created no evidence directory. The operator did not run any network-changing operation. The automated suite already covered the identity guard; a CLI regression also checks exit code 1 and absence of the output directory.
 
+### Additional checks — 2026-11-14
+
+**Live identity mismatch:** the collector was run inside `tempest-ns-lab` with the expected inode incremented by one. It failed with `capture failed: target namespace identity changed`, exit code 1, and created no evidence directory. This was a read-only live check. It did not create or alter kernel objects.
+
+**Offline replay:** the operator used the private real capture at `/tmp/tempest-capture-1`; no raw feed, address, key, or private artifact was copied into the repository. All six feed files were checked against the SHA-256 values in their manifest. The parsed snapshot was used only in memory. A desired `MANAGED_INTERFACE` named `lo` with the observed object's fingerprint was rejected with `desired resource collides with unproven observation`. Then the `lo` MTU was incremented only in a copied JSON feed and reparsed in memory: object ID stayed the same, fingerprint and inventory revision changed, and proof remained `None`. The replay ended with `All offline checks passed`.
+
+The offline replay validates parser/registry behavior against a real read-only snapshot. It does not load an ownership receipt or test any mutation path. The manifest digests establish feed integrity relative to that manifest, not authenticity or ownership.
+
 ### Confirmed facts and remaining unknowns
 
 Confirmed by this trial: the collector ran in the prepared disposable VM; the target namespace differed from the main namespace; two captures produced identical six-feed bytes, identity and revision; each returned six unproven observations; both manifests denied atomicity and ownership proof; the collector refused the main namespace before creating evidence.
 
 Still unverified: runtime Agent systemd sandbox enforcement and effective capability masks; durable ownership receipts and restart recovery; real nftables, route, `ip rule`, TUN or WireGuard apply/rollback; and ownership enforcement on network objects changed by TEMPEST. No such objects were created or changed during this trial. The trial does not accept task 2.5, Gate 2, or ADR-001.
 
-## Next minimal non-mutating trial
+## Next VM-only foreign-object experiment — plan only; not run
 
-Keep the same disposable-VM, snapshot, console and private-evidence controls. Do not create or modify nftables, routes, `ip rule`, fwmark, TUN or WireGuard objects. Use the live inventory only as observations, which remain unproven:
+This experiment will create temporary nftables, `ip rule`, and route objects inside `tempest-ns-lab`. **Do not execute it until separately authorized.** Use the disposable VM's verified snapshot and independent hypervisor console; the target namespace must have no external veth or default route. Do not run on TYPHOON, VORTEX, or the VM's main namespace.
 
-1. Capture the prepared target and record identity/revision. Select existing observations as foreign inputs; do not infer ownership from names, handles, marks, IDs or matching fingerprints.
-2. Run a deliberately mismatched expected boot ID and a deliberately mismatched namespace device/inode against the collector. Each must fail closed before any evidence directory is created.
-3. Feed a copied snapshot with a changed fingerprint/revision into the fixture-level registry/plan checks. Verify drift is reported and no proof is assigned. Use an observed foreign claim as a collision input and verify a desired object requesting that claim is rejected without adoption.
-4. Capture the real target again and compare its six feeds and identity to the initial capture. Record that this scenario made no network changes.
+### Preflight and seed
 
-This is a read-only check of identity rejection, foreign-claim conflict and unproven drift handling. It does not test enforcement during mutation or recovery after a real object was changed; those require a separately authorized network-changing experiment. Do not start task 2.6 as part of this plan.
+1. Record the VM snapshot ID, boot ID, target and main namespace identities, and fresh target/main link, rule, route, and nft JSON snapshots. Confirm the target namespace still has only the expected lab links and no external path.
+2. Generate a unique run suffix. Before creating anything, verify that the proposed nft table/chain names, nft selectors, `ip rule` priority and fwmark, routing table ID, and destination/table route slot are absent from complete target snapshots. Check both namespaces. If any proposed claim is present or the inventory is incomplete, stop, choose a new unique claim, and repeat preflight.
+3. Seed exactly one foreign nft table named with a `tempest-foreign-<run>` prefix, a regular unhooked chain and a simple rule in that chain; one `ip rule` at a unique priority matching a run-specific fwmark and looking up a dedicated table; and one blackhole route for `198.18.0.0/15` in that table. Use no base chain, hook, default route, veth, TUN, WireGuard interface, or packet mark. The mark must not be applied to traffic. Record the exact commands and object selectors in a private log.
+4. Read the inventory again. Confirm only the three planned foreign resource groups appeared in the target namespace, all observations have `proof=None`, and no corresponding object appeared in the main namespace. Keep raw snapshots private.
+
+### Offline conflict checks and rollback
+
+5. Feed the read-only target snapshot to the parser and conflict checker. Prepare desired copies that collide separately with the foreign nft table/chain/rule selector, `ip rule` priority/mark, and route destination/table slot. Each must fail closed as an unproven/foreign conflict; none may receive a proof. Do not call Agent apply or delete code.
+6. Compare the seeded objects byte-for-byte across a second read-only capture (allowing only fields already proven volatile). Verify host/main namespace snapshots remain unchanged and no packets or routes were redirected.
+7. Remove only the exact test route, exact `ip rule` selector, and exact run-specific nft table that this procedure created, in reverse order. Never use `flush`, broad priority/table deletion, or wildcard cleanup. Re-capture and verify the target returns to its saved baseline and the main namespace is unchanged. If an exact cleanup cannot be verified, stop and restore the VM snapshot from the hypervisor console; do not guess at additional deletes.
+
+This would test foreign-object enumeration, claim conflict and safe cleanup in a disposable namespace. It still would not establish TEMPEST ownership enforcement on changed kernel objects because no TEMPEST mutation backend exists in this slice. It does not start task 2.6 or accept task 2.5, Gate 2, or ADR-001.
 
 ## Read-only trial, after VM preparation
 

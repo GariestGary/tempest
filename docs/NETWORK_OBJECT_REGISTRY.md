@@ -1,6 +1,6 @@
 # Network Object Registry — task 2.5, first review slice
 
-**Status (2026-11-14):** the first pure model and in-memory backend slice is `ACCEPTED` by the owner after review of `07cdc1701152d1220c02c8429009507d4ed287e4` and successful CI #27. The fixture-based parser and read-only collector have completed their first disposable-VM read-only trial. Task 2.5 remains `IN_PROGRESS`; the foreign-object, mismatched-identity and drift checks remain. No NetworkPlan v1 or IPC change, durable journal, or network mutation is included.
+**Status (2026-11-14):** the first pure model and in-memory backend slice is `ACCEPTED` by the owner after review of `07cdc1701152d1220c02c8429009507d4ed287e4` and successful CI #27. The fixture-based parser and collector have completed live read-only inventory and identity-mismatch checks; the real capture also passed offline foreign-claim and copied-snapshot drift replay. Task 2.5 remains `IN_PROGRESS`; VM preflight/seed/conflict/cleanup for actual foreign nftables objects, `ip rule` and routes remains unrun. No NetworkPlan v1 or IPC change, durable journal, or network mutation is included.
 
 Implementation: `backend/app/network_agent/registry.py`. Only Agent-local code may construct its inventory and retain receipts. `owner="tempest"` in a requested object is an intent assertion, **never ownership evidence**. The Control Plane cannot mint or supply the backend proof.
 

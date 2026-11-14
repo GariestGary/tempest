@@ -1,5 +1,6 @@
 """Fixture and mocked collector checks; safe on Windows without privileges."""
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -82,6 +83,20 @@ def test_foreign_nft_name_is_not_adopted():
     assert table.proof is None
 
 
+def test_existing_loopback_claim_cannot_be_adopted_with_matching_fingerprint():
+    result = snapshot()
+    observed = next(obj for obj in result.objects if obj.kind == ObjectKind.MANAGED_INTERFACE
+                    and ResourceClaim(ClaimKind.INTERFACE_NAME, "lo") in obj.claims)
+    desired = NetworkObject(
+        "tempest-wanted", ObjectKind.MANAGED_INTERFACE, NAMESPACE.name, "tempest",
+        uuid4(), 1, observed.claims, observed.fingerprint,
+    )
+
+    with pytest.raises(RegistryConflict, match="collides with unproven observation"):
+        reject_unproven_desired(result, (desired,), namespace=NAMESPACE)
+    assert observed.proof is None
+
+
 def test_nft_handle_reuse_does_not_make_owner():
     first = snapshot()
     data = feeds()
@@ -93,6 +108,25 @@ def test_nft_handle_reuse_does_not_make_owner():
     new = next(obj for obj in second.objects if obj.kind == ObjectKind.NFT_RULE)
     assert old.object_id == new.object_id  # Handle is a selector within the chain.
     assert old.fingerprint != new.fingerprint and new.proof is None
+
+
+def test_link_mtu_drift_changes_fingerprint_and_revision_without_proof():
+    before_data = feeds()
+    before = snapshot(before_data)
+    links = json.loads(before_data["link_json"])
+    loopback = next(link for link in links if link["ifname"] == "lo")
+    loopback["mtu"] += 1
+    after_data = dict(before_data, link_json=json.dumps(links))
+    after = snapshot(after_data)
+
+    old = next(obj for obj in before.objects if obj.kind == ObjectKind.MANAGED_INTERFACE
+               and ResourceClaim(ClaimKind.INTERFACE_NAME, "lo") in obj.claims)
+    new = next(obj for obj in after.objects if obj.kind == ObjectKind.MANAGED_INTERFACE
+               and ResourceClaim(ClaimKind.INTERFACE_NAME, "lo") in obj.claims)
+    assert new.object_id == old.object_id
+    assert new.fingerprint != old.fingerprint
+    assert after.revision != before.revision
+    assert new.proof is None
 
 
 @pytest.mark.parametrize("field,new_value", [("ifname", "someone-else"), ("ifindex", 9)])
@@ -339,6 +373,9 @@ def test_collector_fixed_commands_and_no_automatic_proof(monkeypatch, tmp_path):
     manifest = json.loads((destination / "manifest.json").read_text())
     assert manifest["atomic"] is False and manifest["ownership_proof"] is False
     assert len(manifest["feeds"]) == 6
+    for feed in manifest["feeds"]:
+        raw = (destination / feed["name"]).read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == feed["sha256"]
 
 
 @pytest.mark.parametrize("bad_name,returncode,stderr", [
@@ -407,6 +444,27 @@ def test_cli_host_namespace_refusal_exits_without_evidence(monkeypatch, tmp_path
 
     assert error.value.code == 1
     assert "capture failed: target is the host namespace" in capsys.readouterr().err
+    assert not output.exists()
+
+
+def test_cli_identity_mismatch_exits_without_evidence(monkeypatch, tmp_path, capsys):
+    output = tmp_path / "mismatched-capture"
+    monkeypatch.setattr(collector.sys, "platform", "linux")
+    monkeypatch.setattr(collector.sys, "argv", [
+        "linux_inventory_capture", "--name", NAMESPACE.name,
+        "--boot-id", NAMESPACE.boot_id,
+        "--netns-device", str(NAMESPACE.netns_device),
+        "--netns-inode", str(NAMESPACE.netns_inode),
+        "--output-dir", str(output),
+    ])
+    monkeypatch.setattr(collector, "_current_identity", lambda name: NamespaceIdentity(
+        name, NAMESPACE.boot_id, NAMESPACE.netns_device, NAMESPACE.netns_inode + 1))
+
+    with pytest.raises(SystemExit) as error:
+        collector.main()
+
+    assert error.value.code == 1
+    assert "capture failed: target namespace identity changed" in capsys.readouterr().err
     assert not output.exists()
 
 
