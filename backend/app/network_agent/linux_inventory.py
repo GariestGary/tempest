@@ -289,7 +289,7 @@ def parse_linux_inventory(*, links_json: str, rules_json: str, routes_json: str,
             if value["json_schema_version"] != 1:
                 raise InventoryError("unsupported nft JSON schema")
             continue
-        fields = {"table": {"family", "name", "handle"}, "chain": {"family", "table", "name", "handle", "type", "hook", "prio", "policy", "dev"}, "rule": {"family", "table", "chain", "handle", "expr", "comment", "index"}}.get(entity)
+        fields = {"table": {"family", "name", "handle", "comment"}, "chain": {"family", "table", "name", "handle", "type", "hook", "prio", "policy", "dev"}, "rule": {"family", "table", "chain", "handle", "expr", "comment", "index"}}.get(entity)
         required = {"family", "name"} if entity == "table" else {"family", "table", "name"} if entity == "chain" else {"family", "table", "chain", "handle", "expr"}
         if fields is None:
             raise InventoryError(f"unsupported nft entity: {entity}")
@@ -302,6 +302,8 @@ def parse_linux_inventory(*, links_json: str, rules_json: str, routes_json: str,
         handle = _number(row["handle"], "nft handle", minimum=1) if "handle" in row else None
         key = (family, table_name, chain_name, handle if entity == "rule" else None)
         if entity == "table":
+            if "comment" in row:
+                _string(row["comment"], "nft table comment")
             nft_tables.add((family, table_name))
         elif entity == "chain":
             nft_chains.add((family, table_name, chain_name))

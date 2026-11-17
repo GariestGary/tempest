@@ -1,10 +1,4 @@
-"""Standalone, privilege-free AF_UNIX transport for the NetworkAgent contract.
-
-This service only dispatches to the in-memory MockNetworkAgent. It does not
-perform network/kernel mutations, application-state file I/O, subprocess,
-Docker, SSH, or systemd operations. Filesystem access is limited to its Unix
-socket and optional kernel peer-cgroup metadata under /proc.
-"""
+"""AF_UNIX transport for the mock Agent and the opt-in lab table Agent."""
 
 from __future__ import annotations
 
@@ -18,11 +12,11 @@ import struct
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 from uuid import UUID
 
 from .mock import MockNetworkAgent
-from .models import IPCProtocolError, MAX_IPC_MESSAGE_BYTES, parse_ipc_request
+from .models import IPCProtocolError, IPCResponse, MAX_IPC_MESSAGE_BYTES, parse_ipc_request
 
 LOG = logging.getLogger("tempest.network_agent")
 _UNIX_STREAM_SERVER = getattr(socketserver, "UnixStreamServer", None)
@@ -118,6 +112,10 @@ def write_frame(connection: socket.socket, payload: bytes) -> None:
     connection.sendall(FRAME_HEADER.pack(len(payload)) + payload)
 
 
+class AgentHandler(Protocol):
+    def handle_request(self, request) -> IPCResponse: ...
+
+
 class AgentServer(_UNIX_STREAM_SERVER or socketserver.TCPServer):
     """Single-threaded listener serializes clients and state transitions."""
 
@@ -129,10 +127,11 @@ class AgentServer(_UNIX_STREAM_SERVER or socketserver.TCPServer):
         self,
         socket_path: str | os.PathLike[str],
         *,
-        agent: MockNetworkAgent,
+        agent: AgentHandler,
         peer_policy: PeerPolicy,
         io_timeout_seconds: float = 2.0,
         replay_guard: ReplayGuard | None = None,
+        parse_request: Callable = parse_ipc_request,
     ) -> None:
         if _UNIX_STREAM_SERVER is None or not hasattr(socket, "SO_PEERCRED"):
             raise RuntimeError("Network Agent IPC requires Linux AF_UNIX and SO_PEERCRED")
@@ -140,6 +139,7 @@ class AgentServer(_UNIX_STREAM_SERVER or socketserver.TCPServer):
         self.peer_policy = peer_policy
         self.io_timeout_seconds = io_timeout_seconds
         self.replay_guard = replay_guard or ReplayGuard()
+        self.parse_request = parse_request
         super().__init__(str(socket_path), _RequestHandler, bind_and_activate=False)
         self.server_bind()
         os.chmod(socket_path, 0o660)
@@ -155,7 +155,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             cgroup = _read_peer_cgroup(peer.pid) if self.server.peer_policy.expected_cgroup else None
             self.server.peer_policy.authorize(peer, cgroup=cgroup)
             payload = read_frame(connection)
-            request = parse_ipc_request(payload)
+            request = self.server.parse_request(payload)
             response = self.server.replay_guard.execute(
                 request.request_id,
                 payload,
@@ -221,6 +221,8 @@ def serve(
     allowed_uids: frozenset[int],
     allowed_gids: frozenset[int],
     expected_cgroup: str | None = None,
+    agent: AgentHandler | None = None,
+    parse_request: Callable = parse_ipc_request,
 ) -> None:
     parent = Path(socket_path).parent
     if not parent.is_dir():
@@ -229,10 +231,11 @@ def serve(
         raise RuntimeError("refusing to replace an existing socket path")
     server = AgentServer(
         socket_path,
-        agent=MockNetworkAgent(),
+        agent=MockNetworkAgent() if agent is None else agent,
         peer_policy=PeerPolicy(allowed_uids, allowed_gids, expected_cgroup),
+        parse_request=parse_request,
     )
-    LOG.info("network agent listening socket=%s mode=0660 capabilities=none", socket_path)
+    LOG.info("network agent listening socket=%s mode=0660", socket_path)
     try:
         server.serve_forever(poll_interval=0.25)
     finally:
@@ -251,16 +254,48 @@ def main() -> None:
     parser.add_argument("--allowed-uids", default=os.environ.get("TEMPEST_AGENT_ALLOWED_UIDS"))
     parser.add_argument("--allowed-gids", default=os.environ.get("TEMPEST_AGENT_ALLOWED_GIDS"))
     parser.add_argument("--expected-cgroup", default=os.environ.get("TEMPEST_AGENT_EXPECTED_CGROUP"))
+    parser.add_argument("--lab-table", help="enable the opt-in table backend for this exact selector")
+    parser.add_argument("--lab-journal", type=Path)
+    parser.add_argument("--lab-boot-id")
+    parser.add_argument("--lab-netns", help="preflight target namespace device:inode")
+    parser.add_argument("--lab-host-netns", help="preflight PID 1 namespace device:inode")
     args = parser.parse_args()
     if args.allowed_uids is None or args.allowed_gids is None:
         parser.error("allowed UID and GID lists must be configured explicitly")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    serve(
-        args.socket,
+    peer_options = dict(
         allowed_uids=_parse_id_set(args.allowed_uids, "allowed-uids"),
         allowed_gids=_parse_id_set(args.allowed_gids, "allowed-gids"),
         expected_cgroup=args.expected_cgroup or None,
     )
+    lab_options = (args.lab_table, args.lab_journal, args.lab_boot_id, args.lab_netns, args.lab_host_netns)
+    if not any(option is not None for option in lab_options):
+        serve(args.socket, **peer_options)
+        return
+    if not all(lab_options) or not args.lab_journal.is_absolute() or not Path(args.socket).is_absolute():
+        parser.error("lab backend requires an exact selector, absolute journal/socket paths and verified namespace identities")
+
+    from .linux_inventory import InventoryError, NamespaceIdentity
+    from .nft_table import NftTable
+    from .table_agent import TableAgent
+    from .table_journal import TableJournal
+    from .table_plan import LAB_NAMESPACE, parse_table_request
+
+    try:
+        device, inode = map(int, args.lab_netns.split(":"))
+        host_device, host_inode = map(int, args.lab_host_netns.split(":"))
+        socket_parent = Path(args.socket).parent.stat()
+        if socket_parent.st_uid != os.geteuid() or socket_parent.st_mode & 0o022:
+            raise ValueError("lab socket directory must be Agent-owned and protected")
+        kernel = NftTable(
+            NamespaceIdentity(LAB_NAMESPACE, args.lab_boot_id, device, inode),
+            (host_device, host_inode), args.lab_table,
+        )
+        kernel.preflight()
+        with TableJournal(args.lab_journal) as journal:
+            serve(args.socket, agent=TableAgent(kernel, journal), parse_request=parse_table_request, **peer_options)
+    except (InventoryError, OSError, ValueError) as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":

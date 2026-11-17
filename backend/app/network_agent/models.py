@@ -145,14 +145,34 @@ Operation = Annotated[
 ]
 
 
-class NetworkPlan(ContractModel):
-    """Full desired state for TEMPEST-owned objects in one prepared namespace."""
-
-    schema_version: Literal[1] = 1
+class GenerationPlan(ContractModel):
     generation_id: UUID
     generation: int = Field(ge=1)
     base_generation: int = Field(ge=0)
     target_namespace_id: str = Field(pattern=_NAMESPACE_ID)
+
+    @model_validator(mode="after")
+    def require_new_generation(self) -> "GenerationPlan":
+        if self.generation <= self.base_generation:
+            raise ValueError("generation must be newer than base_generation")
+        return self
+
+    def canonical_json(self) -> str:
+        return json.dumps(
+            self.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+
+    def fingerprint(self) -> str:
+        return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
+
+
+class NetworkPlan(GenerationPlan):
+    """Full desired state for TEMPEST-owned objects in one prepared namespace."""
+
+    schema_version: Literal[1] = 1
     egress_candidates: tuple[EgressCandidate, ...] = Field(min_length=1, max_length=64)
     default_egress_id: str = Field(pattern=_EGRESS_ID)
     direct_fallback_allowed: bool = False
@@ -161,9 +181,6 @@ class NetworkPlan(ContractModel):
 
     @model_validator(mode="after")
     def validate_plan_references(self) -> "NetworkPlan":
-        if self.generation <= self.base_generation:
-            raise ValueError("generation must be newer than base_generation")
-
         candidate_ids = [candidate.egress_id for candidate in self.egress_candidates]
         if len(candidate_ids) != len(set(candidate_ids)):
             raise ValueError("egress candidate IDs must be unique")
@@ -220,17 +237,6 @@ class NetworkPlan(ContractModel):
                 "protected_ingress requires a default block policy in every NetworkPlan"
             )
         return self
-
-    def canonical_json(self) -> str:
-        return json.dumps(
-            self.model_dump(mode="json"),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=True,
-        )
-
-    def fingerprint(self) -> str:
-        return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
 
     def owned_objects(self) -> dict[str, dict[str, object]]:
         return {

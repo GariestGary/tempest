@@ -1,5 +1,11 @@
 # TEMPEST — статус форка
 
+## 2026-11-17 · приёмка 2.5 и начало 2.6
+
+Владелец принял задачу 2.5 (`ACCEPTED`) в проверенных границах. Основание — успешный VM trial на `b3bb6399ff33524569c62feb234d8a80a3483667`, итоговая документация `97bc1ca2892d014b26de04261f97be65fb708bbd`, [CI #40](https://github.com/GariestGary/tempest/actions/runs/44157909294) и [CodeQL #41](https://github.com/GariestGary/tempest/actions/runs/44157909311). Live trial подтвердил обнаружение, отказ в присвоении и точечную очистку пустой nft table, IPv4 rule и blackhole route.
+
+Авторизован [первый срез 2.6](TASK_2_6_FIRST_NFT_TABLE.md) для одной пустой таблицы в `tempest-ns-lab`. Gate 2 `OPEN`, ADR-001 `PROPOSED`.
+
 ## 2026-11-17 · задача 2.5 — FAIL, восстановление VM и успешный повтор
 
 **Исходный trial — `FAIL`** на `be5eab67b76edcc3f5f01881a99d15617ea2c033`. Baseline содержал 10 unproven objects. В диагностическом снимке после отказа обнаружены все три добавления: пустая nft table, IPv4 fwmark rule и blackhole route. Проверка точного селектора отклонила Linux JSON с `"flags": []`, cleanup остановился, все три объекта остались. Шаг отказа Registry в этом запуске не был достигнут. В IPv6-снимках PID 1 значение RA `expires` выросло с 65000 до 65413 за 180 секунд. Это совместимо с обновлением lifetime, причину по снимкам установить нельзя. Приватные feeds и manifest скопированы на TYPHOON до выключения VM и хранятся вне Git.
@@ -12,7 +18,7 @@
 
 На испытанном SHA прошли полная Linux suite, frontend, Compose config/runtime smoke и анализ Python и JavaScript/TypeScript. [GitHub CI](https://github.com/GariestGary/tempest/actions/runs/44157909294), [CodeQL](https://github.com/GariestGary/tempest/actions/runs/44157909311)
 
-В scope повторного trial входили пустая nft table, IPv4 rule и blackhole route. Live nft chain/rule, durable receipts, TEMPEST apply/rollback и runtime-права Agent требуют отдельных испытаний. Task 2.5 `READY_FOR_REVIEW`, Gate 2 `OPEN`, ADR-001 `PROPOSED`.
+В scope повторного trial входили пустая nft table, IPv4 rule и blackhole route. Live nft chain/rule, durable receipts, TEMPEST apply/rollback и runtime-права Agent требуют отдельных испытаний. Этот отчёт предшествовал приёмке 2.5, записанной выше.
 
 ## 2026-11-17 · этап 2, задача 2.5 — результат foreign-ownership VM trial
 

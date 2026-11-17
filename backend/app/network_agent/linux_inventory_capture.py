@@ -15,6 +15,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 from .linux_inventory import (
@@ -60,14 +61,25 @@ def _current_identity(name: str) -> NamespaceIdentity:
         raise InventoryError("cannot read namespace identity") from exc
 
 
-def _check_identity(expected: NamespaceIdentity) -> None:
+def _check_identity(
+    expected: NamespaceIdentity, *, host_namespace: tuple[int, int] | None = None,
+) -> None:
     if _current_identity(expected.name) != expected:
         raise InventoryError("target namespace identity changed")
+    target = (expected.netns_device, expected.netns_inode)
     try:
-        host = Path("/proc/1/ns/net").stat()
+        if host_namespace is None:
+            host = Path("/proc/1/ns/net").stat()
+            host_namespace = (host.st_dev, host.st_ino)
+        else:
+            # Lab mode uses PID 1 identity recorded by the privileged launcher.
+            # CAP_NET_ADMIN alone cannot stat /proc/1/ns/net on some kernels.
+            named = (Path("/run/netns") / expected.name).stat()
+            if (named.st_dev, named.st_ino) != target:
+                raise InventoryError("prepared namespace reference changed")
     except OSError as exc:
-        raise InventoryError("cannot verify host namespace") from exc
-    if (host.st_dev, host.st_ino) == (expected.netns_device, expected.netns_inode):
+        raise InventoryError("cannot verify namespace reference") from exc
+    if host_namespace == target:
         raise InventoryError("target is the host namespace")
 
 
@@ -78,15 +90,20 @@ def _binary(name: str) -> str:
     return executable
 
 
-def capture_linux_inventory(expected: NamespaceIdentity) -> Capture:
+def capture_linux_inventory(
+    expected: NamespaceIdentity, *, host_namespace: tuple[int, int] | None = None,
+) -> Capture:
     """Capture six fixed commands; any failure invalidates the entire result."""
     if sys.platform != "linux":
         raise InventoryError("Linux VM required")
-    _check_identity(expected)
+    check_identity = partial(_check_identity, expected)
+    if host_namespace is not None:
+        check_identity = partial(_check_identity, expected, host_namespace=host_namespace)
+    check_identity()
     binaries = {name: _binary(name) for name in ("ip", "nft")}
     feeds: list[CapturedFeed] = []
     for name, binary, *args in _COMMANDS:
-        _check_identity(expected)
+        check_identity()
         argv = (binaries[binary], *args)
         started = datetime.now(timezone.utc).isoformat()
         try:
@@ -98,7 +115,7 @@ def capture_linux_inventory(expected: NamespaceIdentity) -> Capture:
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise InventoryError(f"{name} capture failed") from exc
         ended = datetime.now(timezone.utc).isoformat()
-        _check_identity(expected)
+        check_identity()
         if result.returncode != 0 or result.stderr or not result.stdout:
             raise InventoryError(f"{name} capture returned error or incomplete output")
         if len(result.stdout) > _MAX_FEED_BYTES:
@@ -117,7 +134,7 @@ def capture_linux_inventory(expected: NamespaceIdentity) -> Capture:
         links_json=raw["link"], rules_json=json.dumps(rules),
         routes_json=json.dumps(routes), nft_json=raw["nft"], namespace=expected,
     )
-    _check_identity(expected)
+    check_identity()
     if not snapshot.complete or any(obj.proof is not None for obj in snapshot.objects):
         raise InventoryError("capture cannot establish ownership")
     return Capture(snapshot, tuple(feeds))
