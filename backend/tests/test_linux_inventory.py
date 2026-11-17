@@ -14,6 +14,9 @@ from app.network_agent.linux_inventory import (
     reject_unproven_desired,
 )
 from app.network_agent import linux_inventory_capture as collector
+from app.network_agent.route_snapshot_compare import (
+    RouteSnapshotMismatch, compare_route_snapshots, validate_snapshot_id,
+)
 from app.network_agent.registry import (
     ClaimKind, NetworkObject, ObjectKind, RegistryConflict, ResourceClaim,
 )
@@ -173,6 +176,96 @@ def test_rule_mark_mask_overlap_with_other_priority_is_a_conflict():
                             ResourceClaim(ClaimKind.IP_RULE_MATCH, rule_match)), "a" * 64)
     with pytest.raises(RegistryConflict, match="selectors/mark overlap"):
         reject_unproven_desired(result, (wanted,), namespace=NAMESPACE)
+
+
+@pytest.mark.parametrize("kind,claim,value", [
+    (ObjectKind.NFT_TABLE, ClaimKind.NFT_TABLE_NAME, '["inet","tempest-filter",null,null]'),
+    (ObjectKind.ROUTING_TABLE, ClaimKind.ROUTING_TABLE_ID, "100"),
+    (ObjectKind.ROUTE, ClaimKind.ROUTE_KEY,
+     '["inet",100,"10.42.0.0/24",null,0,20,"unicast","link","static",null]'),
+])
+def test_foreign_nft_table_routing_table_and_route_slot_block_preflight(kind, claim, value):
+    result = snapshot()
+    wanted = intent(kind, claim, value)
+    with pytest.raises(RegistryConflict):
+        reject_unproven_desired(result, (wanted,), namespace=NAMESPACE)
+
+
+def test_foreign_rule_priority_blocks_preflight_even_with_different_mark():
+    result = snapshot()
+    observed_rule = next(o for o in result.objects if o.kind == ObjectKind.IP_RULE
+                         and ResourceClaim(ClaimKind.IP_RULE_PRIORITY, "100") in o.claims)
+    match = next(c.value for c in observed_rule.claims if c.kind == ClaimKind.IP_RULE_MATCH)
+    wanted = NetworkObject("tempest-rule", ObjectKind.IP_RULE, NAMESPACE.name, "tempest", uuid4(), 1,
+                           (ResourceClaim(ClaimKind.IP_RULE_PRIORITY, "100"),
+                            ResourceClaim(ClaimKind.FWMARK, "44"),
+                            ResourceClaim(ClaimKind.FWMARK_MASK, "255"),
+                            ResourceClaim(ClaimKind.IP_RULE_MATCH, match)), "a" * 64)
+    with pytest.raises(RegistryConflict, match="collides with unproven"):
+        reject_unproven_desired(result, (wanted,), namespace=NAMESPACE)
+
+
+def test_routing_table_claim_conflicts_with_rule_reference_without_any_routes():
+    data = feeds()
+    data["route_json"] = "[]"
+    result = snapshot(data)
+    wanted = intent(ObjectKind.ROUTING_TABLE, ClaimKind.ROUTING_TABLE_ID, "255")
+    with pytest.raises(RegistryConflict, match="referenced by foreign rule"):
+        reject_unproven_desired(result, (wanted,), namespace=NAMESPACE)
+
+
+def test_ipv6_ra_expires_countdown_is_reported_with_bounded_slack():
+    before = [{"dst": "::/0", "gateway": "fe80::1", "dev": "eth0", "table": "main",
+               "metric": 1024, "protocol": "ra", "flags": ["onlink"], "expires": 65329}]
+    after = [dict(before[0], expires=65328)]
+    drifts = compare_route_snapshots(json.dumps(before), json.dumps(after), family="inet6",
+                                     elapsed_seconds=0.4)
+    assert len(drifts) == 1
+    assert (drifts[0].before_expires, drifts[0].after_expires) == (65329, 65328)
+
+
+@pytest.mark.parametrize("change", [
+    {"gateway": "fe80::2"}, {"dev": "other0"}, {"table": 100}, {"metric": 9},
+    {"protocol": "static"}, {"flags": []}, {"dst": "2001:db8::/64"},
+])
+def test_ipv6_ra_route_properties_remain_strict(change):
+    before = [{"dst": "::/0", "gateway": "fe80::1", "dev": "eth0", "table": "main",
+               "metric": 1024, "protocol": "ra", "flags": ["onlink"], "expires": 65329}]
+    after = [dict(before[0], **change, expires=65328)]
+    with pytest.raises(RouteSnapshotMismatch):
+        compare_route_snapshots(json.dumps(before), json.dumps(after), family="inet6",
+                                elapsed_seconds=1)
+
+
+@pytest.mark.parametrize("family,before,after", [
+    ("inet", [{"dst": "0.0.0.0/0", "protocol": "ra", "expires": 99}],
+     [{"dst": "0.0.0.0/0", "protocol": "ra", "expires": 98}]),
+    ("inet6", [{"dst": "::/0", "protocol": "static", "expires": 99}],
+     [{"dst": "::/0", "protocol": "static", "expires": 98}]),
+])
+def test_timer_drift_is_not_ignored_for_non_ipv6_ra_routes(family, before, after):
+    with pytest.raises(RouteSnapshotMismatch):
+        compare_route_snapshots(json.dumps(before), json.dumps(after), family=family,
+                                elapsed_seconds=2)
+
+
+def test_ipv6_ra_timer_increase_or_excessive_decrease_fails():
+    before = [{"dst": "::/0", "protocol": "ra", "expires": 10}]
+    for expires in (11, 1):
+        with pytest.raises(RouteSnapshotMismatch):
+            compare_route_snapshots(json.dumps(before), json.dumps([{"dst": "::/0", "protocol": "ra",
+                                                                    "expires": expires}]),
+                                    family="inet6", elapsed_seconds=1, timer_slack_seconds=1)
+
+
+@pytest.mark.parametrize("value", ["", " ", "<verified-snapshot-id>", "snapshot", "TODO", "example-1"])
+def test_snapshot_id_rejects_empty_and_obvious_placeholders(value):
+    with pytest.raises(RouteSnapshotMismatch, match="snapshot ID"):
+        validate_snapshot_id(value)
+
+
+def test_snapshot_id_accepts_operator_identifier():
+    assert validate_snapshot_id("lab-backup-2026-11-17-a1b2") == "lab-backup-2026-11-17-a1b2"
 
 
 @pytest.mark.parametrize("feed", ("link", "rule", "route", "nft"))

@@ -1,5 +1,15 @@
 # TEMPEST — статус форка
 
+## 2026-11-17 · этап 2, задача 2.5 — результат foreign-ownership VM trial
+
+Оператор выполнил `foreign-ownership-trial.sh --execute` на disposable Ubuntu VM `tempest-lab-ubuntu`, только внутри `tempest-ns-lab` (target namespace 5:4026532548; PID 1 namespace 5:4026531833), проверяя commit `405391dd3f96c0d5f6be05d71f94e0868cde1b2b`. До seed было 6 unproven objects, после — 9; все 3 добавленных объекта обнаружены, все 3 foreign ownership claims отклонены. После точечной очистки target inventory вернулся к 6 исходным объектам, все шесть target feeds совпали с baseline побайтово. Тестовая nft table, временный IPv4 rule и route отсутствовали после cleanup.
+
+Пять host feeds совпали побайтово. Единственное различие в `route6.json`: `expires` IPv6 RA default route уменьшился с 65329 до 65328 за время между captures. Первоначальное bytewise сравнение ошибочно завершилось `PID 1 namespace changed: route6`; это естественный countdown, а не смена namespace. Добавлено семантическое сравнение: оно требует строгого равенства всех остальных полей маршрута и допускает только неотрицательное уменьшение `expires` у IPv6 RA маршрута не больше measured elapsed time + 2 seconds; допустимый drift отдельно возвращается в отчёте. Прочие IPv6 route changes не игнорируются.
+
+Trial покрывал пустую nft table, один IPv4 fwmark rule и один blackhole route. Он **не** создавал nft chain/rule и не проверял их enumeration; поэтому nft chain/rule parsing, TEMPEST mutation/ownership receipts и apply/rollback остаются открытыми. Приватные evidence остались в VM (`/tmp/tempest-foreign-f53e7e5e.U8Rsoc`) и в Git не копировались. Task 2.5 остаётся `IN_PROGRESS`, Gate 2 открыт, ADR-001 `PROPOSED`; это не является приёмкой.
+
+Добавлены regressions для семантического route comparison, selector collisions (nft table, rule priority/fwmark, routing table, route slot) и rejecting empty/placeholder snapshot IDs. Текущий checkout не содержит `scripts/lab/foreign-ownership-trial.sh` ни в HEAD, ни в Git history, поэтому сам VM trial runner и его `--dry-run`/cleanup behavior пока нельзя проверить в этом репозитории. Перед ручным повтором владельцу следует сверить runner и его команды с этой спецификацией; `--execute` автоматически не запускался.
+
 ## 2026-11-14 · этап 2, задача 2.5 — identity mismatch и offline replay
 
 В той же disposable Ubuntu VM collector был запущен в `tempest-ns-lab` с ожидаемым inode `NS_INO + 1`. Результат: `capture failed: target namespace identity changed`, exit code 1; каталог evidence не создан. Это отдельная live read-only проверка identity mismatch.
