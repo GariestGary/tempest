@@ -1,6 +1,6 @@
 # Task 2.6 · First Agent-owned nftables table
 
-The owner authorized this lab slice on 2026-11-17 and extended it to transaction confirmation and recovery for the same table. Task 2.5 is `ACCEPTED` in its verified scope. Task 2.6 is `IN_PROGRESS`, Gate 2 is `OPEN`, and ADR-001 remains `PROPOSED`.
+The owner accepted this lab slice on 2026-11-18 for one empty nftables table in `tempest-ns-lab`. The verified scope covers AF_UNIX creation, the durable ownership receipt, Verify and Confirm, confirmed continuity after process restart, idle deadline rollback, refusal with a foreign child, and exact rollback to baseline. Task 2.5 is `ACCEPTED`, Task 2.6 is `IN_PROGRESS`, Gate 2 is `OPEN`, and ADR-001 remains `PROPOSED`.
 
 ## Operation and contract
 
@@ -96,7 +96,7 @@ Targeted pytest passed on TYPHOON and the VM, 218 tests each. The harness, journ
 ## Acceptance boundary
 
 - **Implemented and verified for the authorized table.** Stage validates the selector and returns the diff. Apply durably records intent and verifies the result against the kernel. Verify and Confirm establish durable last-known-good for the exact generation. Pending generations expire. Same-boot restart preserves valid receipts. Rollback is nonrecursive and requires fresh ownership proof. Confirmed continuity, idle deadline rollback and refusal with a pre-existing foreign child now have live evidence.
-- **Required for full 2.6 under the project spec.** The broader agreed NetworkPlan operation set needs a real backend with the same transaction guarantees. Recovery must reconcile last-known-good after a host reboot or a changed namespace. The current empty-table slice is ready for owner review within its verified scope.
+- **Required for full 2.6 under the project spec.** The broader agreed NetworkPlan operation set needs a real backend with the same transaction guarantees. Recovery must reconcile last-known-good after a host reboot or a changed namespace. [NetworkPlan v1 boundary and proposed LKG contract](NETWORK_PLAN_IPC.md#первый-реальный-срез-v1)
 - **Current boot/namespace behavior.** Launch with stale identity fails preflight. Launch with the current verified identity and an old receipt retains that receipt and reports degraded. It rejects mutations, does not reuse the old boot-relative deadline, and neither adopts nor deletes objects using the prior receipt. Any object observed at the same selector needs fresh ownership proof. A cross-boot recovery contract still needs to specify how to retain the old journal for audit, reconcile observed state, and restore trusted last-known-good without changing unproven objects. An ambiguous result must remain fail-closed.
 - **Live fault injection belongs to separate review.** Task 2.7 schedules nft failure, missing TUN, invalid configuration, IPC loss, reboot before confirm and loss of SSH through the target route. Process loss at either creation boundary and child insertion after the final ownership read have test-double coverage. Their live runs require separate authorization.
 

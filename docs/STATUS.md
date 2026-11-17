@@ -1,5 +1,13 @@
 # TEMPEST — статус форка
 
+## 2026-11-18 · приёмка среза пустой таблицы и переход к NetworkPlan v1
+
+Владелец принял первый лабораторный срез 2.6 как **ACCEPTED** в проверенных границах. Live evidence охватывает создание через AF_UNIX, durable receipt, Verify/Confirm, сохранение confirmed generation после рестарта, idle deadline rollback, отказ удалять чужую цепочку и точечный откат к baseline. [Срез и доказательства](TASK_2_6_FIRST_NFT_TABLE.md)
+
+Первый реальный план v1 заблокирован обязательным `SetEgressPolicy(block)` для `protected_ingress`. Dummy-only отклонён валидатором. План dummy + block формально валиден, но Linux backend пока не применяет саму блокировку. Для полного v1 среза нужен согласованный и проверяемый default block в `tempest-ns-lab`. Схема и runtime код сохранены. Новый live trial — `NOT_RUN`. На TYPHOON и VM прошли по 181 целевому тесту v1, IPC, inventory и Registry. [Блокер и контракт cross-boot LKG](NETWORK_PLAN_IPC.md#первый-реальный-срез-v1)
+
+Task 2.6 остаётся `IN_PROGRESS`, Gate 2 `OPEN`. Cross-boot recovery остаётся критерием полной приёмки.
+
 ## 2026-11-18 · задача 2.6 — подтверждённое поколение после рестарта Agent
 
 **Live trial PASS** на `6c6f37d194db8ec6a5e3841ce4789513fd46276a`. В `tempest-ns-lab` выполнено `stage → apply → verify → confirm → restart → read_status → rollback`. После штатного рестарта и исходного 15-секундного дедлайна receipt `confirmed` совпал побайтово. Свежий `read_status` подтвердил ту же generation и ownership. Явный rollback записал `rolled_back` и удалил таблицу. Все шесть target feeds восстановлены побайтово. Для PID 1 совпали 5/6 feeds, в шестом изменился только IPv6 RA countdown 65317→65300.
