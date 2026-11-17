@@ -29,3 +29,23 @@ Enter the namespace **outside** the Agent with `sudo -n ip netns exec tempest-ns
 From the unprivileged client, send the versioned plan with `stage`, then request `apply` with its generation ID. Capture all six inventory feeds before apply, after apply, and after rollback in the target namespace and PID 1 namespace. Require exactly one new empty target table, validate the journal permissions and receipt, and restart the Agent in the same namespace before rollback to check receipt continuity. Confirm absence and the `rolled_back` receipt after rollback. Preserve evidence privately. On ambiguity, preserve the table and the journal and stop for operator review. Do not use a recursive table delete or ruleset flush as compensation.
 
 The automatic tests inject faults at intent, create, verification, receipt, delete and rollback journal boundaries. Run them with the targeted Agent IPC, NetworkPlan and Linux inventory/registry tests. The real exercise is manual and limited to the approved disposable VM.
+
+## Verified VM evidence · 2026-11-17
+
+The code under test was `febf6a46f36aadb8afe0bf7df135b6f33b853132`, staged from its checked Git archive in a root-owned VM directory. The guest ran Ubuntu 26.04.1 LTS, kernel `7.0.0-43-generic`, nftables 1.1.6 and Python 3.11.18. The libvirt VM had one user-mode NIC. The named target contained only loopback and matched `5:4026532543`; PID 1 matched `5:4026531833`. A fresh full libvirt backup completed, the standalone QCOW2 passed `qemu-img check`, and the independent graphical console showed the guest TTY before apply and rollback. The backup was taken live and was checked for image integrity. No recovery boot was exercised for this image.
+
+The first Agent process (PID 4804) accepted stage and apply from the unprivileged AF_UNIX peer `1000:1000`. The restarted Agent (PID 5027) verified the same generation `23b30b49-4b84-4d98-8e07-71e7e73db903` and completed rollback. Both Agent processes ran as UID 61112 with only `CAP_NET_ADMIN` in all five masks and `NoNewPrivs=1`. The client could not read the Agent journal as its ordinary UID. The confirmed table handle was 2 and the observation fingerprint was `89be3ac0e132783d5f0203a95f4d1568928ba67606b8444a2c2844d2588a3e93`.
+
+| Capture | Target compared with baseline | PID 1 compared with baseline |
+|---|---|---|
+| After apply | Exactly one empty table added. Other five feeds byte-identical. | Six feeds byte-identical. |
+| After restart and rollback | All six feeds byte-identical. Receipt was `rolled_back`. | Five feeds byte-identical. Only IPv6 RA expires changed, 65343→65318. |
+
+Raw captures and logs remain private in the guest under `/var/tmp/tempest-task26-febf6a4-evidence`. The selected tests passed on both TYPHOON and the VM, 192 tests and 17 dependency deprecation warnings per run.
+
+```bash
+# From backend, with the selected Python 3.11 environment
+python -m pytest -x -q tests/test_nft_table_agent.py tests/test_network_agent_ipc.py   tests/test_network_plan_contract.py tests/test_linux_inventory.py   tests/test_network_object_registry.py tests/test_agent_control_plane.py   tests/test_network_plan_builder.py
+```
+
+Tests simulated loss of a create acknowledgement, child insertion, receipt drift, and journal faults. The live run exercised successful creation and rollback across an Agent process restart. Actual VM reboot, live crash injection, and the kernel's rejection of rollback with a concurrently inserted child remain unverified. Production and the remaining Phase 2 tasks require separate review.

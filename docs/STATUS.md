@@ -1,5 +1,13 @@
 # TEMPEST — статус форка
 
+## 2026-11-17 · первый срез 2.6 — Agent-owned nftables table
+
+В disposable Ubuntu VM `tempest-lab-ubuntu` на `febf6a46f36aadb8afe0bf7df135b6f33b853132` новый Agent принял `stage` → `apply` по AF_UNIX от UID/GID 1000 и создал ровно одну пустую `inet tempest-first-nft-table`, handle 2. Kernel listing содержал комментарий транзакции и пустое тело. Receipt сохранился в приватном журнале Agent с режимами каталога `0700` и файла `0600`. После перезапуска Agent подтвердил ту же generation и выполнил nonrecursive rollback через IPC. Receipt перешёл `owned → rolled_back`; таблица отсутствует.
+
+Проверены свежий standalone QCOW2 через `qemu-img check`, независимая графическая консоль перед обеими операциями, target/PID 1 netns `5:4026532543` / `5:4026531833` и отсутствие конфликтов. Agent запущен как UID 61112 с `CAP_NET_ADMIN` (`0x1000` во всех пяти масках) и `NoNewPrivs=1`. После apply остальные пять target feeds и все шесть PID 1 feeds совпали с baseline. После rollback все шесть target feeds совпали побайтово. Из шести PID 1 feeds изменился только route6, где счётчик IPv6 RA уменьшился 65343→65318.
+
+Targeted pytest на TYPHOON и в VM — по **192 passed**, 17 предупреждений о deprecated API. Raw evidence сохранены в VM вне Git. Первый срез проверен, остальной Task 2.6 `IN_PROGRESS`. Gate 2 `OPEN`, ADR-001 `PROPOSED`. [Контракт и evidence](TASK_2_6_FIRST_NFT_TABLE.md)
+
 ## 2026-11-17 · приёмка 2.5 и начало 2.6
 
 Владелец принял задачу 2.5 (`ACCEPTED`) в проверенных границах. Основание — успешный VM trial на `b3bb6399ff33524569c62feb234d8a80a3483667`, итоговая документация `97bc1ca2892d014b26de04261f97be65fb708bbd`, [CI #40](https://github.com/GariestGary/tempest/actions/runs/44157909294) и [CodeQL #41](https://github.com/GariestGary/tempest/actions/runs/44157909311). Live trial подтвердил обнаружение, отказ в присвоении и точечную очистку пустой nft table, IPv4 rule и blackhole route.
