@@ -52,16 +52,29 @@ python -m pytest -x -q tests/test_nft_table_agent.py tests/test_network_agent_ip
 
 Tests simulated loss of a create acknowledgement, child insertion, receipt drift, and journal faults. The live run exercised successful creation and rollback across an Agent process restart. Actual VM reboot, live crash injection, and the kernel's rejection of rollback with a concurrently inserted child remain unverified. Production and the remaining Phase 2 tasks require separate review.
 
-## Confirmation and failure recovery evidence · 2026-11-17
+## Confirmation and failure recovery evidence · 2026-11-18
 
-The tests use a kernel double. They exercise the authenticated Unix listener and private journal on TYPHOON. The earlier live result above applies to the first slice.
+The guest ran targeted pytest and both trials from a SHA-256-verified Git archive of `72891f92aca2a1f6e38f8ccbba37cbdada09d436` in a root-owned directory. The existing guest checkout stayed at `b3bb6399ff33524569c62feb234d8a80a3483667`. Targeted pytest returned **218 passed**, 17 warnings on Ubuntu 26.04.1 LTS with Python 3.11.18. [CI #42 for the tested code](https://github.com/GariestGary/tempest/actions/runs/44175101171) · [CodeQL #43](https://github.com/GariestGary/tempest/actions/runs/44175101160)
 
-| Scenario | Targeted tests | New VM result |
+SSH succeeded with the existing user configuration through Codex's approved out-of-sandbox execution. Within the sandbox the same command returned `socket: Operation not permitted`. The guest DMI UUID matched the libvirt domain, the existing standalone pre-2.6 QCOW2 passed `qemu-img check`, and the independent graphical login prompt responded to keyboard input. The backup was verified for image integrity. No restore boot was performed for these trials. Target `5:4026532543` contained only loopback and had no default routes. PID 1 remained at `5:4026531833`. The Agent ran as UID 61112 with `CAP_NET_ADMIN` in all five capability masks and `NoNewPrivs=1`.
+
+| Scenario | Targeted tests | VM result on `72891f9` |
 |---|---|---|
-| Process loss after durable intent | Degraded after restart, no creation or deletion | `BLOCKED` |
-| Process loss after create and before receipt | Degraded after restart, possible orphan preserved | `BLOCKED` |
-| Restart with confirmed receipt | Same generation reverified after its original deadline | `BLOCKED` |
-| Deadline expires without confirmation | Rollback from an idle AF_UNIX listener and after restart | `BLOCKED` |
-| Foreign child before or during rollback | Refusal before delete or simulated kernel refusal; child preserved | `BLOCKED` |
+| Process loss after durable intent | Degraded after restart, no creation or deletion | `NOT_RUN` |
+| Process loss after create and before receipt | Degraded after restart, possible orphan preserved | `NOT_RUN` |
+| Restart with confirmed receipt | Same generation reverified after its original deadline | `NOT_RUN` |
+| Deadline expires without confirmation | Rollback from an idle AF_UNIX listener and after restart | `PASS`. The table was absent and the receipt was `rolled_back` when observed 110 ms after the six-second deadline, before the next IPC request. |
+| Foreign child present before rollback | Refusal before delete, child preserved | `PASS`. The inert chain `tempest-task26-foreign-child` had no hook or rules. The 12-second expiry left the pending receipt, table and chain intact and logged the refusal before the next IPC request. Explicit rollback returned `ownership_conflict`. |
+| Foreign child inserted after the last verification | Simulated kernel refusal with the child preserved | `NOT_RUN` |
 
-OpenSSH rejected `/etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf` when running `ssh -o BatchMode=yes -o ConnectTimeout=5 lab true`. Guest pytest, selector preflight, restore image and independent console verification did not run. No live failure-injection result is available for this change.
+In the foreign-child trial the operator removed only the authorized test chain by its verified handle. The restarted Agent used the same expired receipt to roll back its now-empty table. Both trials returned all six target feeds to their byte-identical baselines. Five PID 1 feeds matched byte-for-byte. The only difference in the sixth was an IPv6 RA lifetime countdown, 65087→65081 for the deadline trial and 65070→65056 for the foreign-child trial. The target nftables ruleset was empty and no Agent PID remained. The private VM evidence, harness and verified SHA-256 manifest are under `/var/tmp/tempest-task26-72891f9-incoming.SI8TnE`.
+
+```bash
+# From the archived backend directory, using the guest's existing Python 3.11 venv
+python -B -m pytest -x -q -p no:cacheprovider \
+  tests/test_nft_table_agent.py tests/test_network_agent_ipc.py tests/test_network_plan_contract.py \
+  tests/test_linux_inventory.py tests/test_network_object_registry.py tests/test_agent_control_plane.py \
+  tests/test_network_plan_builder.py tests/test_agent_compose_isolation.py
+```
+
+Task 2.6 remains `IN_PROGRESS`. Live confirmation followed by restart, both process-loss boundaries, the concurrent child-insertion race and reboot recovery remain open.
