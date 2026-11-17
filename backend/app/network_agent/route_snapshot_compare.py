@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 
 class RouteSnapshotMismatch(ValueError):
-    """Snapshots differ outside an allowed IPv6 RA lifetime countdown."""
+    """Snapshots cannot be matched with only IPv6 RA lifetime differences."""
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,7 @@ class TimerDrift:
     before_expires: int
     after_expires: int
     elapsed_seconds: float
+    classification: Literal["countdown", "refresh_compatible"]
 
 
 def validate_snapshot_id(value: str) -> str:
@@ -40,13 +43,14 @@ def compare_route_snapshots(
     elapsed_seconds: float,
     timer_slack_seconds: float = 2.0,
 ) -> tuple[TimerDrift, ...]:
-    """Require identical route records except a bounded IPv6 RA countdown.
+    """Match complete route records, allowing only IPv6 RA timer changes.
 
-    The complete route object is compared after removing ``expires``. A timer
-    may only decrease, only for IPv6 routes whose protocol is ``ra``, and by
-    no more than the measured capture interval plus the documented slack.
+    A decrease is bounded by the capture interval plus slack. An increase is
+    consistent with a lifetime refresh, but snapshots cannot identify its cause.
     """
-    if family not in {"inet", "inet6"} or elapsed_seconds < 0 or timer_slack_seconds < 0:
+    if family not in {"inet", "inet6"} or not all(
+        math.isfinite(seconds) and seconds >= 0 for seconds in (elapsed_seconds, timer_slack_seconds)
+    ):
         raise RouteSnapshotMismatch("invalid route comparison context")
     try:
         before = json.loads(before_json)
@@ -58,42 +62,34 @@ def compare_route_snapshots(
     if len(before) != len(after) or any(not isinstance(row, dict) for row in before + after):
         raise RouteSnapshotMismatch("route inventory changed")
 
-    def normalized(row: dict) -> str:
-        return json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-    # Non-RA routes and all IPv4 routes remain byte-semantically strict.
-    drifts: list[TimerDrift] = []
-    unmatched_after = list(after)
-    for row in before:
-        ra_timer = family == "inet6" and row.get("protocol") == "ra" and type(row.get("expires")) is int
-        if ra_timer:
+    def index_routes(rows: list[dict]) -> dict[str, int | None]:
+        timers = {}
+        for row in rows:
             stable = dict(row)
-            old_expires = stable.pop("expires")
-            key = normalized(stable)
-            matches = [candidate for candidate in unmatched_after
-                       if isinstance(candidate, dict)
-                       and candidate.get("protocol") == "ra"
-                       and type(candidate.get("expires")) is int
-                       and normalized({k: v for k, v in candidate.items() if k != "expires"}) == key]
-            if not matches:
-                raise RouteSnapshotMismatch("IPv6 RA route properties changed")
-            match = matches[0]
-            new_expires = match["expires"]
-            if old_expires < 0 or new_expires < 0:
-                raise RouteSnapshotMismatch("invalid IPv6 RA expires value")
-            drift = old_expires - new_expires
-            if drift < 0 or drift > elapsed_seconds + timer_slack_seconds:
-                raise RouteSnapshotMismatch("IPv6 RA expires drift outside elapsed-time allowance")
-            unmatched_after.remove(match)
-            if drift:
-                drifts.append(TimerDrift(key, old_expires, new_expires, elapsed_seconds))
+            expires = None
+            if family == "inet6" and row.get("protocol") == "ra" and "expires" in row:
+                expires = stable.pop("expires")
+                if type(expires) is not int or expires < 0:
+                    raise RouteSnapshotMismatch("invalid IPv6 RA expires value")
+            key = json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+            if key in timers:
+                raise RouteSnapshotMismatch("ambiguous route snapshot match")
+            timers[key] = expires
+        return timers
+
+    before_timers = index_routes(before)
+    after_timers = index_routes(after)
+    if before_timers.keys() != after_timers.keys():
+        raise RouteSnapshotMismatch("route properties changed")
+    drifts: list[TimerDrift] = []
+    for key, old_expires in before_timers.items():
+        new_expires = after_timers[key]
+        if old_expires == new_expires:
             continue
-        key = normalized(row)
-        match = next((candidate for candidate in unmatched_after
-                      if isinstance(candidate, dict) and normalized(candidate) == key), None)
-        if match is None:
-            raise RouteSnapshotMismatch("route properties changed")
-        unmatched_after.remove(match)
-    if unmatched_after:
-        raise RouteSnapshotMismatch("route inventory changed")
+        if old_expires is None or new_expires is None:
+            raise RouteSnapshotMismatch("IPv6 RA expires field appeared or disappeared")
+        if old_expires - new_expires > elapsed_seconds + timer_slack_seconds:
+            raise RouteSnapshotMismatch("IPv6 RA expires countdown outside elapsed-time allowance")
+        classification = "countdown" if new_expires < old_expires else "refresh_compatible"
+        drifts.append(TimerDrift(key, old_expires, new_expires, elapsed_seconds, classification))
     return tuple(drifts)

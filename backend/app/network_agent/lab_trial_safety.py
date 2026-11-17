@@ -148,8 +148,8 @@ def _route_metric(row: dict) -> int:
 
 
 def _is_trial_route(row: dict, *, destination: str, route_table: int, route_metric: int, table_id) -> bool:
-    allowed = {"_trial_family", "family", "dst", "table", "type", "protocol", "metric", "priority", "scope"}
-    if set(row) - allowed:
+    allowed = {"_trial_family", "family", "dst", "table", "type", "protocol", "metric", "priority", "scope", "flags"}
+    if set(row) - allowed or row.get("flags", []) != []:
         return False
     if row.get("_trial_family", row.get("family", "inet")) != "inet":
         return False

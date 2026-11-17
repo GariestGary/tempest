@@ -91,6 +91,24 @@ def test_selector_validator_accepts_exact_reverse_cleanup_states_110_100_000():
     check_state("000", trial_state())
 
 
+def test_selector_validator_accepts_live_blackhole_route_with_empty_flags():
+    rules, routes, nftables = trial_state(table=True, rule=True)
+    routes.append({"_trial_family": "inet", "type": "blackhole", "dst": DESTINATION,
+                   "table": str(ROUTE_TABLE), "protocol": "static", "metric": ROUTE_METRIC,
+                   "flags": []})
+
+    check_state("111", (rules, routes, nftables))
+
+
+@pytest.mark.parametrize("flags", [["onlink"], {}, "", None, False])
+def test_selector_validator_rejects_blackhole_route_with_unexpected_flags(flags):
+    rules, routes, nftables = trial_state(table=True, rule=True, route=True)
+    routes[-1]["flags"] = flags
+
+    with pytest.raises(TrialSafetyError, match="route destination/table slot is occupied"):
+        check_state("111", (rules, routes, nftables))
+
+
 @pytest.mark.parametrize("expected,state,reason", [
     ("110", {"table": True, "rule": True, "foreign_table_rule": True}, "routing table ID is referenced"),
     ("000", {"foreign_priority": True}, "priority already occupied"),

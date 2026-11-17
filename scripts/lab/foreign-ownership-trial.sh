@@ -223,10 +223,10 @@ from app.network_agent.route_snapshot_compare import compare_route_snapshots
 before,after,before_at,after_at=sys.argv[1:]
 elapsed=float(after_at)-float(before_at)
 drifts=compare_route_snapshots(Path(before).read_text(),Path(after).read_text(),family="inet6",elapsed_seconds=elapsed,timer_slack_seconds=2.0)
-if drifts:
- print("Allowed IPv6 RA timer drift(s):")
- for drift in drifts: print(f"  expires {drift.before_expires} -> {drift.after_expires}; elapsed {drift.elapsed_seconds:.3f}s; route={drift.route}")
-else:
- print("Host IPv6 route snapshot unchanged.")
+print("Host IPv6 route attributes other than RA expires matched in both captures.")
+for drift in drifts:
+ print(f"IPv6 RA {drift.classification}: expires {drift.before_expires} -> {drift.after_expires}; elapsed {drift.elapsed_seconds:.3f}s; route={drift.route}")
+if any(drift.classification == "refresh_compatible" for drift in drifts):
+ print("An RA lifetime refresh could explain the increase. Its cause requires independent evidence.")
 PY
-echo "PASS: cleanup and target/PID1 before-after feeds match. Private evidence: $EVIDENCE"
+echo "PASS: exact cleanup restored target feeds; PID 1 snapshots matched under the reported IPv6 RA timer comparison. Private evidence: $EVIDENCE"

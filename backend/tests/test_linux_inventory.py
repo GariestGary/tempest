@@ -221,17 +221,34 @@ def test_ipv6_ra_expires_countdown_is_reported_with_bounded_slack():
     drifts = compare_route_snapshots(json.dumps(before), json.dumps(after), family="inet6",
                                      elapsed_seconds=0.4)
     assert len(drifts) == 1
+    assert drifts[0].classification == "countdown"
     assert (drifts[0].before_expires, drifts[0].after_expires) == (65329, 65328)
+
+
+def test_ipv6_ra_timer_increase_is_reported_as_compatible_with_refresh():
+    before = {"dst": "default", "gateway": "fe80::1", "dev": "eth0", "table": "main",
+              "metric": 1024, "protocol": "ra", "flags": [], "expires": 65000}
+    static = {"dst": "2001:db8::/64", "dev": "eth0", "protocol": "kernel"}
+    after = dict(before, expires=65413)
+
+    drifts = compare_route_snapshots(json.dumps([before, static]), json.dumps([static, after]),
+                                     family="inet6", elapsed_seconds=180)
+
+    assert len(drifts) == 1
+    assert drifts[0].classification == "refresh_compatible"
+    assert (drifts[0].before_expires, drifts[0].after_expires) == (65000, 65413)
 
 
 @pytest.mark.parametrize("change", [
     {"gateway": "fe80::2"}, {"dev": "other0"}, {"table": 100}, {"metric": 9},
     {"protocol": "static"}, {"flags": []}, {"dst": "2001:db8::/64"},
+    {"pref": "high"},
 ])
-def test_ipv6_ra_route_properties_remain_strict(change):
+@pytest.mark.parametrize("expires", [65328, 65413])
+def test_ipv6_ra_route_properties_remain_strict(change, expires):
     before = [{"dst": "::/0", "gateway": "fe80::1", "dev": "eth0", "table": "main",
                "metric": 1024, "protocol": "ra", "flags": ["onlink"], "expires": 65329}]
-    after = [dict(before[0], **change, expires=65328)]
+    after = [dict(before[0], **change, expires=expires)]
     with pytest.raises(RouteSnapshotMismatch):
         compare_route_snapshots(json.dumps(before), json.dumps(after), family="inet6",
                                 elapsed_seconds=1)
@@ -249,13 +266,44 @@ def test_timer_drift_is_not_ignored_for_non_ipv6_ra_routes(family, before, after
                                 elapsed_seconds=2)
 
 
-def test_ipv6_ra_timer_increase_or_excessive_decrease_fails():
-    before = [{"dst": "::/0", "protocol": "ra", "expires": 10}]
-    for expires in (11, 1):
-        with pytest.raises(RouteSnapshotMismatch):
-            compare_route_snapshots(json.dumps(before), json.dumps([{"dst": "::/0", "protocol": "ra",
-                                                                    "expires": expires}]),
-                                    family="inet6", elapsed_seconds=1, timer_slack_seconds=1)
+def test_ipv6_ra_excessive_countdown_fails():
+    before = {"dst": "::/0", "protocol": "ra", "expires": 10}
+    with pytest.raises(RouteSnapshotMismatch, match="countdown outside elapsed-time allowance"):
+        compare_route_snapshots(json.dumps([before]), json.dumps([dict(before, expires=1)]),
+                                family="inet6", elapsed_seconds=1, timer_slack_seconds=1)
+
+
+@pytest.mark.parametrize("expires", [None, True, -1, "65413"])
+def test_malformed_ipv6_ra_expires_fails(expires):
+    before = {"dst": "::/0", "protocol": "ra", "expires": 65000}
+    with pytest.raises(RouteSnapshotMismatch, match="invalid IPv6 RA expires"):
+        compare_route_snapshots(json.dumps([before]), json.dumps([dict(before, expires=expires)]),
+                                family="inet6", elapsed_seconds=180)
+
+
+def test_ipv6_ra_expires_disappearance_fails():
+    after = {"dst": "::/0", "protocol": "ra"}
+    before = dict(after, expires=65000)
+    with pytest.raises(RouteSnapshotMismatch, match="expires field appeared or disappeared"):
+        compare_route_snapshots(json.dumps([before]), json.dumps([after]),
+                                family="inet6", elapsed_seconds=180)
+
+
+def test_ipv6_ra_snapshot_rejects_ambiguous_matches():
+    route = {"dst": "::/0", "protocol": "ra"}
+    before = [dict(route, expires=65000), dict(route, expires=65100)]
+    after = [dict(route, expires=65413), dict(route, expires=65400)]
+    with pytest.raises(RouteSnapshotMismatch, match="ambiguous route snapshot match"):
+        compare_route_snapshots(json.dumps(before), json.dumps(after), family="inet6", elapsed_seconds=180)
+
+
+@pytest.mark.parametrize("added", [True, False])
+def test_ipv6_ra_snapshot_rejects_added_or_removed_routes(added):
+    route = {"dst": "::/0", "protocol": "ra", "expires": 65000}
+    more = [route, dict(route, dst="2001:db8::/64")]
+    before, after = ([route], more) if added else (more, [route])
+    with pytest.raises(RouteSnapshotMismatch, match="route inventory changed"):
+        compare_route_snapshots(json.dumps(before), json.dumps(after), family="inet6", elapsed_seconds=180)
 
 
 @pytest.mark.parametrize("value", ["", " ", "<verified-snapshot-id>", "snapshot", "TODO", "example-1"])
