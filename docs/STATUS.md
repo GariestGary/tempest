@@ -1,5 +1,11 @@
 # TEMPEST — статус форка
 
+## 2026-11-18 · задача 2.6 — подтверждённое поколение после рестарта Agent
+
+**Live trial PASS** на `6c6f37d194db8ec6a5e3841ce4789513fd46276a`. В `tempest-ns-lab` выполнено `stage → apply → verify → confirm → restart → read_status → rollback`. После штатного рестарта и исходного 15-секундного дедлайна receipt `confirmed` совпал побайтово. Свежий `read_status` подтвердил ту же generation и ownership. Явный rollback записал `rolled_back` и удалил таблицу. Все шесть target feeds восстановлены побайтово. Для PID 1 совпали 5/6 feeds, в шестом изменился только IPv6 RA countdown 65317→65300.
+
+На TYPHOON и VM прошли по **218 целевых тестов**. Для разрешённой пустой таблицы успешный транзакционный цикл готов к ревью. Для полной 2.6 по спецификации открыты фактические операции более широкого NetworkPlan и восстановление last-known-good после reboot. При смене boot или namespace текущий Agent сохраняет старый receipt и отказывает в мутациях. Live fault injection относится к отдельной задаче 2.7. Task 2.6 `IN_PROGRESS`, Gate 2 `OPEN`. [Отчёт об испытании](TASK_2_6_FIRST_NFT_TABLE.md#live-confirmation-continuity--2026-11-18)
+
 ## 2026-11-18 · задача 2.6 — автоматический откат и сохранение чужой цепочки на VM
 
 На `72891f92aca2a1f6e38f8ccbba37cbdada09d436` прошли **218 targeted pytest** и два live-прогона в `tempest-ns-lab` на disposable Ubuntu VM `tempest-lab-ubuntu`. SSH заработал со штатным разрешением Codex вне sandbox. Перед мутациями проверены совпадение UUID VM, standalone QCOW2 и отклик независимой графической консоли. Гостевой checkout остался на прежнем SHA. Для испытаний использовался отдельный проверенный архив.

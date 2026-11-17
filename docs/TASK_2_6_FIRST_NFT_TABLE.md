@@ -77,4 +77,27 @@ python -B -m pytest -x -q -p no:cacheprovider \
   tests/test_network_plan_builder.py tests/test_agent_compose_isolation.py
 ```
 
-Task 2.6 remains `IN_PROGRESS`. Live confirmation followed by restart, both process-loss boundaries, the concurrent child-insertion race and reboot recovery remain open.
+At the end of these two trials, live confirmation continuity, the process-loss boundaries, the concurrent child-insertion race and reboot recovery remained open.
+
+## Live confirmation continuity · 2026-11-18
+
+**PASS** on `6c6f37d194db8ec6a5e3841ce4789513fd46276a`. The single trial used a SHA-256-verified Git archive in a root-owned directory. The target was `tempest-ns-lab` at `5:4026532543`, distinct from PID 1 at `5:4026531833`. Previously used test journals were `rolled_back`. Before the trial, the target had only loopback, no default route, no nftables objects and no Agent process. The standalone pre-2.6 QCOW2 passed `qemu-img check`. The independent graphical console responded to keyboard input. Both Agent processes ran as UID 61112 with only `CAP_NET_ADMIN` in all five masks and `NoNewPrivs=1`.
+
+The authenticated AF_UNIX client staged and applied generation `2c16ec58-1ac0-40e7-9c70-cd9fb13b3f9a`, then sent `verify` and `confirm`. The journal progressed from `pending_confirmation` to `verified` to `confirmed`. Process 8064 exited normally and process 8302 reopened the same journal directory in the same boot and namespace before the original 15-second deadline. After that deadline, the `confirmed` receipt was byte-identical and the table still had handle 5 and the original transaction marker. A fresh `read_status` request reverified kernel ownership and reported active and last-known-good generation 1 with the original UUID and no pending generation. Explicit `rollback` returned active and last-known-good generation 0, left a `rolled_back` receipt with the same evidence and removed the table.
+
+| Capture | Target versus baseline | PID 1 versus baseline |
+|---|---|---|
+| After confirm | 5/6 feeds byte-identical. One empty table added. | 5/6 byte-identical. IPv6 RA `expires` decreased 65317→65316. |
+| After restart and original deadline | 5/6 feeds byte-identical. The table matched the confirmed snapshot. | 5/6 byte-identical. IPv6 RA `expires` decreased 65317→65300. |
+| After explicit rollback | 6/6 feeds byte-identical. No Agent process remained. | 5/6 byte-identical. IPv6 RA `expires` decreased 65317→65300. |
+
+Targeted pytest passed on TYPHOON and the VM, 218 tests each. The harness, journal copies, snapshots and verified SHA-256 manifest remain private in the guest at `/var/tmp/tempest-task26-6c6f37d-incoming.UQv2Ij`. [CI for the tested SHA](https://github.com/GariestGary/tempest/actions/runs/44178532208) · [CodeQL for the tested SHA](https://github.com/GariestGary/tempest/actions/runs/44178532069)
+
+## Acceptance boundary
+
+- **Implemented and verified for the authorized table.** Stage validates the selector and returns the diff. Apply durably records intent and verifies the result against the kernel. Verify and Confirm establish durable last-known-good for the exact generation. Pending generations expire. Same-boot restart preserves valid receipts. Rollback is nonrecursive and requires fresh ownership proof. Confirmed continuity, idle deadline rollback and refusal with a pre-existing foreign child now have live evidence.
+- **Required for full 2.6 under the project spec.** The broader agreed NetworkPlan operation set needs a real backend with the same transaction guarantees. Recovery must reconcile last-known-good after a host reboot or a changed namespace. The current empty-table slice is ready for owner review within its verified scope.
+- **Current boot/namespace behavior.** Launch with stale identity fails preflight. Launch with the current verified identity and an old receipt retains that receipt and reports degraded. It rejects mutations, does not reuse the old boot-relative deadline, and neither adopts nor deletes objects using the prior receipt. Any object observed at the same selector needs fresh ownership proof. A cross-boot recovery contract still needs to specify how to retain the old journal for audit, reconcile observed state, and restore trusted last-known-good without changing unproven objects. An ambiguous result must remain fail-closed.
+- **Live fault injection belongs to separate review.** Task 2.7 schedules nft failure, missing TUN, invalid configuration, IPC loss, reboot before confirm and loss of SSH through the target route. Process loss at either creation boundary and child insertion after the final ownership read have test-double coverage. Their live runs require separate authorization.
+
+Task 2.6 remains `IN_PROGRESS`. Gate 2 remains `OPEN`.
