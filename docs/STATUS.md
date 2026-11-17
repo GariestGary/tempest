@@ -1,5 +1,13 @@
 # TEMPEST — статус форка
 
+## 2026-11-17 · задача 2.6 — подтверждение и восстановление пустой таблицы
+
+Существующий Lab Agent сохраняет `pending_confirmation` только после чтения таблицы из ядра. `verify` проверяет receipt заново и сохраняет разрешение на подтверждение. `confirm` повторяет проверку и закрепляет поколение в журнале до ответа клиенту. Дедлайн действует в пределах одного boot и сохраняется при перезапуске Agent. При истечении Agent выполняет нерекурсивный rollback только при совпадении receipt с ядром. При неполном receipt, смене namespace или постороннем child Agent сообщает `degraded` и сохраняет объект.
+
+На TYPHOON с Python 3.11.18 прошли `scripts/local-check.sh quick` (**78 passed**) и `backend/.venv/bin/python -m pytest -x -q backend/tests/test_nft_table_agent.py backend/tests/test_linux_inventory.py backend/tests/test_network_object_registry.py` (**140 passed**). `git diff --check` прошёл. Тесты используют реальный AF_UNIX и приватный журнал с test double вместо сетевого ядра.
+
+Продолжение VM trial и гостевой pytest **BLOCKED**. OpenSSH отклонил `/etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf` из-за владельца или прав, поэтому новая проверка restore path и независимой консоли не состоялась. Результат прежнего VM trial зафиксирован ниже. Полная приёмка требует живой проверки после подтверждения доступа и восстановления, а также отдельного разбора recovery через reboot. Задача 2.6 `IN_PROGRESS`, Gate 2 `OPEN`. [Контракт и матрица проверок](TASK_2_6_FIRST_NFT_TABLE.md)
+
 ## 2026-11-17 · первый срез 2.6 — Agent-owned nftables table
 
 В disposable Ubuntu VM `tempest-lab-ubuntu` на `febf6a46f36aadb8afe0bf7df135b6f33b853132` новый Agent принял `stage` → `apply` по AF_UNIX от UID/GID 1000 и создал ровно одну пустую `inet tempest-first-nft-table`, handle 2. Kernel listing содержал комментарий транзакции и пустое тело. Receipt сохранился в приватном журнале Agent с режимами каталога `0700` и файла `0600`. После перезапуска Agent подтвердил ту же generation и выполнил nonrecursive rollback через IPC. Receipt перешёл `owned → rolled_back`; таблица отсутствует.

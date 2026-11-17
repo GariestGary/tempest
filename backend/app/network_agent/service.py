@@ -10,6 +10,7 @@ import socket
 import socketserver
 import struct
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
@@ -87,10 +88,15 @@ def peer_identity(connection: socket.socket) -> PeerIdentity:
     return PeerIdentity(pid=pid, uid=uid, gid=gid)
 
 
-def _read_exact(connection: socket.socket, size: int) -> bytes:
+def _read_exact(connection: socket.socket, size: int, deadline: float | None) -> bytes:
     chunks: list[bytes] = []
     remaining = size
     while remaining:
+        if deadline is not None:
+            timeout = deadline - time.monotonic()
+            if timeout <= 0:
+                raise TimeoutError("IPC frame read deadline expired")
+            connection.settimeout(timeout)
         chunk = connection.recv(remaining)
         if not chunk:
             raise EOFError("connection closed before frame completed")
@@ -99,11 +105,11 @@ def _read_exact(connection: socket.socket, size: int) -> bytes:
     return b"".join(chunks)
 
 
-def read_frame(connection: socket.socket) -> bytes:
-    size = FRAME_HEADER.unpack(_read_exact(connection, FRAME_HEADER.size))[0]
+def read_frame(connection: socket.socket, *, deadline: float | None = None) -> bytes:
+    size = FRAME_HEADER.unpack(_read_exact(connection, FRAME_HEADER.size, deadline))[0]
     if size < 1 or size > MAX_IPC_MESSAGE_BYTES:
         raise IPCProtocolError("IPC frame length is outside the allowed range")
-    return _read_exact(connection, size)
+    return _read_exact(connection, size, deadline)
 
 
 def write_frame(connection: socket.socket, payload: bytes) -> None:
@@ -132,6 +138,7 @@ class AgentServer(_UNIX_STREAM_SERVER or socketserver.TCPServer):
         io_timeout_seconds: float = 2.0,
         replay_guard: ReplayGuard | None = None,
         parse_request: Callable = parse_ipc_request,
+        maintain: Callable[[], None] | None = None,
     ) -> None:
         if _UNIX_STREAM_SERVER is None or not hasattr(socket, "SO_PEERCRED"):
             raise RuntimeError("Network Agent IPC requires Linux AF_UNIX and SO_PEERCRED")
@@ -140,10 +147,15 @@ class AgentServer(_UNIX_STREAM_SERVER or socketserver.TCPServer):
         self.io_timeout_seconds = io_timeout_seconds
         self.replay_guard = replay_guard or ReplayGuard()
         self.parse_request = parse_request
+        self._maintain = maintain
         super().__init__(str(socket_path), _RequestHandler, bind_and_activate=False)
         self.server_bind()
         os.chmod(socket_path, 0o660)
         self.server_activate()
+
+    def service_actions(self) -> None:
+        if self._maintain is not None:
+            self._maintain()
 
 
 class _RequestHandler(socketserver.StreamRequestHandler):
@@ -154,7 +166,10 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             peer = peer_identity(connection)
             cgroup = _read_peer_cgroup(peer.pid) if self.server.peer_policy.expected_cgroup else None
             self.server.peer_policy.authorize(peer, cgroup=cgroup)
-            payload = read_frame(connection)
+            # A peer sending a frame in small pieces must still release the
+            # listener in time for transaction maintenance.
+            payload = read_frame(connection, deadline=time.monotonic() + self.server.io_timeout_seconds)
+            connection.settimeout(self.server.io_timeout_seconds)
             request = self.server.parse_request(payload)
             response = self.server.replay_guard.execute(
                 request.request_id,
@@ -223,6 +238,7 @@ def serve(
     expected_cgroup: str | None = None,
     agent: AgentHandler | None = None,
     parse_request: Callable = parse_ipc_request,
+    maintain: Callable[[], None] | None = None,
 ) -> None:
     parent = Path(socket_path).parent
     if not parent.is_dir():
@@ -234,9 +250,11 @@ def serve(
         agent=MockNetworkAgent() if agent is None else agent,
         peer_policy=PeerPolicy(allowed_uids, allowed_gids, expected_cgroup),
         parse_request=parse_request,
+        maintain=maintain,
     )
     LOG.info("network agent listening socket=%s mode=0660", socket_path)
     try:
+        server.service_actions()
         server.serve_forever(poll_interval=0.25)
     finally:
         server.server_close()
@@ -293,7 +311,11 @@ def main() -> None:
         )
         kernel.preflight()
         with TableJournal(args.lab_journal) as journal:
-            serve(args.socket, agent=TableAgent(kernel, journal), parse_request=parse_table_request, **peer_options)
+            agent = TableAgent(kernel, journal)
+            serve(
+                args.socket, agent=agent, parse_request=parse_table_request,
+                maintain=agent.maintain, **peer_options,
+            )
     except (InventoryError, OSError, ValueError) as exc:
         parser.error(str(exc))
 

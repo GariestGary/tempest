@@ -6,8 +6,8 @@ from uuid import UUID
 from pydantic import Field, TypeAdapter, ValidationError
 
 from .models import (
-    ApplyRequest, ContractModel, GenerationPlan, IPCProtocolError, IPCResponse,
-    MAX_IPC_MESSAGE_BYTES, ReadStatusRequest, RollbackRequest, _RESOURCE_ID,
+    ApplyRequest, ConfirmRequest, ContractModel, GenerationPlan, IPCProtocolError, IPCResponse,
+    MAX_IPC_MESSAGE_BYTES, ReadStatusRequest, RollbackRequest, VerifyRequest, _RESOURCE_ID,
 )
 
 LAB_NAMESPACE = "tempest-ns-lab"
@@ -24,6 +24,7 @@ class TablePlan(GenerationPlan):
     schema_version: Literal[2]
     target_namespace_id: Literal[LAB_NAMESPACE]
     operations: tuple[CreateNftTable]
+    confirmation_timeout_seconds: int = Field(default=60, strict=True, ge=5, le=300)
 
 
 class StageTableRequest(ContractModel):
@@ -34,6 +35,14 @@ class StageTableRequest(ContractModel):
 
 
 class ApplyTableRequest(ApplyRequest):
+    protocol_version: Literal[2] = Field(...)
+
+
+class VerifyTableRequest(VerifyRequest):
+    protocol_version: Literal[2] = Field(...)
+
+
+class ConfirmTableRequest(ConfirmRequest):
     protocol_version: Literal[2] = Field(...)
 
 
@@ -50,7 +59,10 @@ class TableResponse(IPCResponse):
 
 
 TableRequest = Annotated[
-    Union[StageTableRequest, ApplyTableRequest, RollbackTableRequest, TableStatusRequest],
+    Union[
+        StageTableRequest, ApplyTableRequest, VerifyTableRequest, ConfirmTableRequest,
+        RollbackTableRequest, TableStatusRequest,
+    ],
     Field(discriminator="method"),
 ]
 _REQUEST = TypeAdapter(TableRequest)

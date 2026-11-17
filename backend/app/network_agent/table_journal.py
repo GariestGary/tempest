@@ -14,6 +14,7 @@ from .models import ContractModel
 from .table_plan import TablePlan
 
 _MAX_RECORD = 8192
+PENDING_CONFIRMATION = frozenset({"pending_confirmation", "verified"})
 
 
 class TableEvidence(ContractModel):
@@ -23,14 +24,19 @@ class TableEvidence(ContractModel):
 
 
 class TableRecord(ContractModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2]
     transaction_id: UUID
     namespace: NamespaceIdentity
     plan: TablePlan
-    phase: Literal["create_pending", "owned", "rollback_pending", "rolled_back"]
+    phase: Literal[
+        "create_pending", "owned", "pending_confirmation", "verified", "confirmed",
+        "rollback_pending", "rolled_back",
+    ]
     intent_at: datetime
     created_at: datetime | None = None
     evidence: TableEvidence | None = None
+    deadline_boot_ms: int | None = Field(default=None, strict=True, gt=0)
+    deadline_epoch_ms: int | None = Field(default=None, strict=True, gt=0)
 
     @model_validator(mode="after")
     def check_evidence(self) -> "TableRecord":
@@ -40,6 +46,12 @@ class TableRecord(ContractModel):
         expected = self.phase != "create_pending"
         if fields_present != (expected, expected):
             raise ValueError("journal phase and receipt disagree")
+        deadlines = (self.deadline_boot_ms is not None, self.deadline_epoch_ms is not None)
+        if self.schema_version == 1:
+            if any(deadlines) or self.phase in PENDING_CONFIRMATION | {"confirmed"}:
+                raise ValueError("legacy receipt has transaction confirmation fields")
+        elif self.phase == "owned" or deadlines != (expected, expected):
+            raise ValueError("journal phase and confirmation deadline disagree")
         return self
 
 
@@ -89,6 +101,7 @@ class TableJournal:
     def write(self, record: TableRecord) -> None:
         # Pydantic also serializes the registry's namespace identity.
         data = record.model_dump_json().encode()
+        TableRecord.model_validate_json(data)
         if len(data) > _MAX_RECORD:
             raise ValueError("journal record exceeds size limit")
         temporary = f".table-{uuid4().hex}"
