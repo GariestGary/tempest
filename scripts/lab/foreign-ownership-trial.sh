@@ -62,58 +62,31 @@ CREATED_TABLE=0 CREATED_RULE=0 CREATED_ROUTE=0
 target() { ip netns exec "$NS" "$@"; }
 
 # Check exact selectors in either the prepared namespace or PID 1 namespace.
-combine_arrays() {
-  "$PYTHON" -c 'import json,sys; a=json.loads(sys.argv[1]); b=json.loads(sys.argv[2]); assert isinstance(a,list) and isinstance(b,list); print(json.dumps(a+b))' "$1" "$2"
+combine_rule_arrays() {
+  "$PYTHON" -c 'import json,sys; a=json.loads(sys.argv[1]); b=json.loads(sys.argv[2]); assert isinstance(a,list) and isinstance(b,list); [x.update(_trial_family="inet") for x in a]; [x.update(_trial_family="inet6") for x in b]; print(json.dumps(a+b))' "$1" "$2"
+}
+combine_route_arrays() {
+  "$PYTHON" -c 'import json,sys; a=json.loads(sys.argv[1]); b=json.loads(sys.argv[2]); assert isinstance(a,list) and isinstance(b,list); [x.update(_trial_family="inet") for x in a]; [x.update(_trial_family="inet6") for x in b]; print(json.dumps(a+b))' "$1" "$2"
 }
 check_selectors() {
   local where="$1" expected="$2" rules routes nftout
   if [[ "$where" == target ]]; then
-    rules="$(combine_arrays "$(target ip -4 -j rule)" "$(target ip -6 -j rule)")"
-    routes="$(combine_arrays "$(target ip -4 -j route show table all)" "$(target ip -6 -j route show table all)")"
+    rules="$(combine_rule_arrays "$(target ip -4 -j rule)" "$(target ip -6 -j rule)")"
+    routes="$(combine_route_arrays "$(target ip -4 -j route show table all)" "$(target ip -6 -j route show table all)")"
     nftout="$(target nft -j list ruleset)"
   else
-    rules="$(combine_arrays "$(ip -4 -j rule)" "$(ip -6 -j rule)")"
-    routes="$(combine_arrays "$(ip -4 -j route show table all)" "$(ip -6 -j route show table all)")"
+    rules="$(combine_rule_arrays "$(ip -4 -j rule)" "$(ip -6 -j rule)")"
+    routes="$(combine_route_arrays "$(ip -4 -j route show table all)" "$(ip -6 -j route show table all)")"
     nftout="$(nft -j list ruleset)"
   fi
   RULES="$rules" ROUTES="$routes" NFT="$nftout" EXPECT="$expected" TABLE="$TABLE" PRIORITY="$PRIORITY" MARK="$MARK" ROUTE_TABLE="$ROUTE_TABLE" PREFIX="$PREFIX" ROUTE_METRIC="$ROUTE_METRIC" \
-    "$PYTHON" -c 'import json,os,sys
-r=json.loads(os.environ["RULES"]); q=json.loads(os.environ["ROUTES"]); n=json.loads(os.environ["NFT"])
-p=int(os.environ["PRIORITY"]); m=int(os.environ["MARK"],0); tab=int(os.environ["ROUTE_TABLE"]); dst=os.environ["PREFIX"]
-want=tuple(c=="1" for c in os.environ["EXPECT"])
-def table_id(x):
- v=x.get("table")
- v={"local":255,"main":254,"default":253}.get(v,v)
- return int(v) if isinstance(v,str) and v.isdecimal() else v
-if not isinstance(r,list) or not isinstance(q,list) or not isinstance(n.get("nftables"),list): raise ValueError("incomplete selector inventory")
-tables=[]
-for e in n["nftables"]:
- if not isinstance(e,dict) or len(e)!=1: raise ValueError("ambiguous nft object")
- kind,x=next(iter(e.items()))
- if kind not in {"metainfo","table","chain","rule","set","map","element","counter","quota","flowtable"}: raise ValueError("unknown nft object")
- own_table=kind=="table" and x.get("family")=="inet" and x.get("name")==os.environ["TABLE"]
- if own_table: tables.append(e)
- if kind!="metainfo" and not own_table and x.get("family")=="inet" and (x.get("table")==os.environ["TABLE"] or (kind=="table" and x.get("name")==os.environ["TABLE"])): raise ValueError("nft table name or child selector occupied")
-if any(not isinstance(x,dict) for x in r+q): raise ValueError("ambiguous ip object")
-priority_rows=[x for x in r if int(x.get("priority",x.get("pref",-1)))==p]
-def mark_value(x,k,default):
- v=x.get(k,default); return int(str(v),0)
-overlaps=[]
-for x in r:
- em=mark_value(x,"fwmark",0); mask=mark_value(x,"fwmask",0xffffffff)
- if (m & mask)==(em & mask): overlaps.append(x)
-table_rules=[x for x in r if table_id(x)==tab]
-table_routes=[x for x in q if table_id(x)==tab]
-rule_trial=[x for x in priority_rows if mark_value(x,"fwmark",0)==m and mark_value(x,"fwmask",0xffffffff)==0xffffffff and table_id(x)==tab]
-route_slots=[x for x in q if x.get("dst")==dst and table_id(x)==tab]
-route_trial=[x for x in route_slots if x.get("type")=="blackhole" and int(x.get("metric",x.get("priority",0)))==int(os.environ["ROUTE_METRIC"]) and x.get("protocol")=="static"]
-if len(tables)>1 or len(rule_trial)>1 or len(route_trial)>1: raise ValueError("ambiguous duplicate trial selector")
-if len(tables)!=want[0] or len(rule_trial)!=want[1] or len(route_trial)!=want[2]: raise ValueError("selector collision or unexpected trial state")
-if any(x not in rule_trial for x in priority_rows): raise ValueError("ip rule priority already occupied")
-if any(x not in rule_trial for x in overlaps): raise ValueError("fwmark overlaps an existing ip rule")
-if any(x not in route_trial for x in table_rules): raise ValueError("routing table ID is referenced by another ip rule")
-if any(x not in route_trial for x in table_routes): raise ValueError("routing table ID contains another route")
-if any(x not in route_trial for x in route_slots): raise ValueError("route destination/table slot is occupied by another route")'
+    PYTHONPATH="$BACKEND" "$PYTHON" -c 'import json,os
+from app.network_agent.lab_trial_safety import validate_trial_selectors
+validate_trial_selectors(
+ rules=json.loads(os.environ["RULES"]), routes=json.loads(os.environ["ROUTES"]),
+ nftables=json.loads(os.environ["NFT"]).get("nftables"), expected=os.environ["EXPECT"],
+ nft_table=os.environ["TABLE"], priority=int(os.environ["PRIORITY"]), mark=int(os.environ["MARK"],0),
+ route_table=int(os.environ["ROUTE_TABLE"]), destination=os.environ["PREFIX"], route_metric=int(os.environ["ROUTE_METRIC"]))'
 }
 preflight() {
   local expect="${CREATED_TABLE}${CREATED_RULE}${CREATED_ROUTE}"

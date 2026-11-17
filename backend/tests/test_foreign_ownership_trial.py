@@ -1,16 +1,26 @@
 """Non-mutating checks for the operator-only foreign ownership VM runner."""
 
 import os
+import json
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from app.network_agent.lab_trial_safety import TrialSafetyError, require_empty_nft_table
+from app.network_agent.lab_trial_safety import (
+    TrialSafetyError, require_empty_nft_table, validate_trial_selectors,
+)
 
 
 SCRIPT = Path(__file__).parents[2] / "scripts" / "lab" / "foreign-ownership-trial.sh"
+FIXTURES = Path(__file__).parent / "fixtures" / "linux_inventory"
+TABLE = "tempest_foreign_a1b2c3d4"
+PRIORITY = 32345
+MARK = 0x7E123456
+ROUTE_TABLE = 32123
+DESTINATION = "198.18.0.0/15"
+ROUTE_METRIC = 42420
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="Bash is required for shell runner checks")
@@ -42,16 +52,86 @@ def test_trial_cleanup_uses_exact_route_rule_then_empty_table_guard():
     assert "unknown children" in source
 
 
-def test_selector_preflight_checks_priority_mark_table_and_route_slot():
-    source = SCRIPT.read_text(encoding="utf-8")
-    for fail_closed_reason in (
-        "ip rule priority already occupied",
-        "fwmark overlaps an existing ip rule",
-        "routing table ID is referenced by another ip rule",
-        "routing table ID contains another route",
-        "route destination/table slot is occupied by another route",
-    ):
-        assert fail_closed_reason in source
+def trial_state(*, table=False, rule=False, route=False):
+    rules = json.loads((FIXTURES / "rule.json").read_text())
+    routes = json.loads((FIXTURES / "route.json").read_text())
+    nftables = json.loads((FIXTURES / "nft.json").read_text())["nftables"]
+    if table:
+        nftables.append({"table": {"family": "inet", "name": TABLE}})
+    if rule:
+        rules.append({"family": "inet", "priority": PRIORITY, "fwmark": hex(MARK),
+                      "fwmask": "0xffffffff", "table": ROUTE_TABLE, "action": "to_tbl"})
+    if route:
+        routes.append({"family": "inet", "dst": DESTINATION, "table": ROUTE_TABLE,
+                       "type": "blackhole", "protocol": "static", "metric": ROUTE_METRIC})
+    return rules, routes, nftables
+
+
+def check_state(expected, state):
+    rules, routes, nftables = state
+    validate_trial_selectors(rules=rules, routes=routes, nftables=nftables,
+                             expected=expected, nft_table=TABLE, priority=PRIORITY,
+                             mark=MARK, route_table=ROUTE_TABLE,
+                             destination=DESTINATION, route_metric=ROUTE_METRIC)
+
+
+@pytest.mark.parametrize("expected,state", [
+    ("000", (False, False, False)),
+    ("100", (True, False, False)),
+    ("110", (True, True, False)),
+    ("111", (True, True, True)),
+])
+def test_selector_validator_accepts_each_seed_state_from_linux_json_fixtures(expected, state):
+    check_state(expected, trial_state(table=state[0], rule=state[1], route=state[2]))
+
+
+def test_selector_validator_accepts_exact_reverse_cleanup_states_110_100_000():
+    check_state("110", trial_state(table=True, rule=True))
+    check_state("100", trial_state(table=True))
+    check_state("000", trial_state())
+
+
+@pytest.mark.parametrize("expected,state,reason", [
+    ("110", {"table": True, "rule": True, "foreign_table_rule": True}, "routing table ID is referenced"),
+    ("000", {"foreign_priority": True}, "priority already occupied"),
+    ("000", {"overlapping_mark": True}, "fwmark overlaps"),
+    ("110", {"table": True, "rule": True, "foreign_route": True}, "routing table ID contains"),
+    ("110", {"table": True, "rule": True, "route_slot_collision": True}, "route destination/table slot is occupied"),
+    ("100", {"table": True, "child": True}, "foreign child"),
+    ("000", {"table_name_collision": True}, "nft table selector collision"),
+    ("111", {"table": True, "rule": True, "route": True, "duplicate_rule": True}, "ambiguous duplicate ip rule"),
+])
+def test_selector_validator_rejects_foreign_or_ambiguous_objects(expected, state, reason):
+    rules, routes, nftables = trial_state(table=state.get("table", False),
+                                         rule=state.get("rule", False),
+                                         route=state.get("route", False))
+    if state.get("foreign_table_rule"):
+        rules.append({"family": "inet", "priority": PRIORITY + 1, "fwmark": "0x1",
+                      "fwmask": "0xffffffff", "table": ROUTE_TABLE, "action": "to_tbl"})
+    if state.get("foreign_priority"):
+        rules.append({"family": "inet6", "priority": PRIORITY, "fwmark": "0x11111111",
+                      "fwmask": "0xffffffff", "table": 300, "action": "to_tbl"})
+    if state.get("overlapping_mark"):
+        rules.append({"family": "inet", "priority": PRIORITY + 2, "fwmark": hex(MARK & 0xFF),
+                      "fwmask": "0xff", "table": 300, "action": "to_tbl"})
+    if state.get("foreign_route"):
+        routes.append({"family": "inet", "dst": "203.0.113.0/24", "table": ROUTE_TABLE,
+                       "type": "blackhole", "protocol": "static", "metric": 7})
+    if state.get("route_slot_collision"):
+        routes.append({"family": "inet", "dst": DESTINATION, "table": ROUTE_TABLE,
+                       "type": "unicast", "gateway": "192.0.2.99", "protocol": "static", "metric": 7})
+    if state.get("child"):
+        nftables.append({"chain": {"family": "inet", "table": TABLE, "name": "unexpected"}})
+    if state.get("table_name_collision"):
+        nftables.append({"table": {"family": "inet", "name": TABLE}})
+    if state.get("duplicate_rule"):
+        rules.append({"family": "inet", "priority": PRIORITY, "fwmark": hex(MARK),
+                      "fwmask": "0xffffffff", "table": ROUTE_TABLE, "action": "to_tbl"})
+    with pytest.raises(TrialSafetyError, match=reason):
+        validate_trial_selectors(rules=rules, routes=routes, nftables=nftables,
+                                 expected=expected, nft_table=TABLE, priority=PRIORITY,
+                                 mark=MARK, route_table=ROUTE_TABLE,
+                                 destination=DESTINATION, route_metric=ROUTE_METRIC)
 
 
 @pytest.mark.parametrize("rows", [
