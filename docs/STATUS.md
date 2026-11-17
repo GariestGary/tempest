@@ -1,5 +1,19 @@
 # TEMPEST — статус форка
 
+## 2026-11-17 · задача 2.5 — FAIL, восстановление VM и успешный повтор
+
+**Исходный trial — `FAIL`** на `be5eab67b76edcc3f5f01881a99d15617ea2c033`. Baseline содержал 10 unproven objects. В диагностическом снимке после отказа обнаружены все три добавления: пустая nft table, IPv4 fwmark rule и blackhole route. Проверка точного селектора отклонила Linux JSON с `"flags": []`, cleanup остановился, все три объекта остались. Шаг отказа Registry в этом запуске не был достигнут. В IPv6-снимках PID 1 значение RA `expires` выросло с 65000 до 65413 за 180 секунд. Это совместимо с обновлением lifetime, причину по снимкам установить нельзя. Приватные feeds и manifest скопированы на TYPHOON до выключения VM и хранятся вне Git.
+
+**Восстановление.** Подтверждены UUID VM, активный диск, свободное место, SHA-256 офлайн-копии и XML по manifest. После штатного `shut off` прежний диск сохранён отдельно. Копия на активном пути прошла сверку SHA-256 и `qemu-img check` до запуска. В восстановленной Ubuntu подтверждены SSH, ответ независимой графической консоли и разделение namespace PID 1 `5:4026531833` и target `5:4026532543`. В заново созданном `tempest-ns-lab` был только `lo`, без default routes. Селекторы предыдущего trial отсутствовали в обоих namespace.
+
+**Повтор — `PASS`** на `b3bb6399ff33524569c62feb234d8a80a3483667`. Runner после интерактивного подтверждения выполнил один `--execute`. Инвентарь target `10 → 13 → 10`, обнаружены 3/3 unproven objects, отклонены 3/3 foreign claims. Точечное удаление прошло в порядке `route → rule → nft table`. Все шесть target feeds вернулись к baseline побайтово, trial objects отсутствуют. Пять feeds PID 1 совпали побайтово, в `route6` изменился только RA countdown `65362 → 65358` за 4,380 с. Снимки не выявили изменений стабильных сетевых атрибутов PID 1, вызванных trial. SHA-256 всех target feeds проверены по четырём manifest вне Git.
+
+**Проверки.** На TYPHOON и в госте по 134 passed / 3 warnings для `test_foreign_ownership_trial.py`, `test_linux_inventory.py`, `test_network_object_registry.py` с `pytest -x -q`. `bash -n`, `--dry-run` и `git diff --check` прошли. Route guard принимает только отсутствующие или пустые `flags`. Comparator различает ограниченный countdown и рост `expires`, совместимый с refresh, сохраняя строгое сопоставление остальных полей. Ветка refresh покрыта тестами и replay снимков FAIL. В повторном trial наблюдался countdown.
+
+На испытанном SHA прошли полная Linux suite, frontend, Compose config/runtime smoke и анализ Python и JavaScript/TypeScript. [GitHub CI](https://github.com/GariestGary/tempest/actions/runs/44157909294), [CodeQL](https://github.com/GariestGary/tempest/actions/runs/44157909311)
+
+В scope повторного trial входили пустая nft table, IPv4 rule и blackhole route. Live nft chain/rule, durable receipts, TEMPEST apply/rollback и runtime-права Agent требуют отдельных испытаний. Task 2.5 `READY_FOR_REVIEW`, Gate 2 `OPEN`, ADR-001 `PROPOSED`.
+
 ## 2026-11-17 · этап 2, задача 2.5 — результат foreign-ownership VM trial
 
 Оператор выполнил `foreign-ownership-trial.sh --execute` на disposable Ubuntu VM `tempest-lab-ubuntu`, только внутри `tempest-ns-lab` (target namespace 5:4026532548; PID 1 namespace 5:4026531833), проверяя commit `405391dd3f96c0d5f6be05d71f94e0868cde1b2b`. До seed было 6 unproven objects, после — 9; все 3 добавленных объекта обнаружены, все 3 foreign ownership claims отклонены. После точечной очистки target inventory вернулся к 6 исходным объектам, все шесть target feeds совпали с baseline побайтово. Тестовая nft table, временный IPv4 rule и route отсутствовали после cleanup.

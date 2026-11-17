@@ -1,6 +1,6 @@
 # Task 2.5 — isolated Linux VM test plan
 
-**Status (2026-11-17):** the first foreign-object VM trial ran in the disposable VM `tempest-lab-ubuntu`, target namespace `tempest-ns-lab`, at commit `405391dd3f96c0d5f6be05d71f94e0868cde1b2b`. It confirmed detection of all three added unproven objects, rejection of all three foreign claims, exact cleanup, restoration of the target inventory to six baseline objects, and byte-identical target feeds. Five host feeds were byte-identical. `route6.json` differed only because an IPv6 RA default route's `expires` decreased from 65329 to 65328; the earlier bytewise comparator incorrectly failed on this natural one-second countdown. A strict semantic comparison is now required: all route properties remain exact, with only a bounded countdown allowance for IPv6 RA `expires`. Task 2.5 remains `IN_PROGRESS`; ADR-001 remains `PROPOSED`; Gate 2 is open.
+**Status (2026-11-17).** The single authorized rerun passed in `tempest-lab-ubuntu` on `b3bb6399ff33524569c62feb234d8a80a3483667` after offline disk recovery. The trial detected three foreign objects, rejected their ownership claims and removed those objects by exact selectors. The target inventory returned to its 10-object baseline. Task 2.5 is `READY_FOR_REVIEW`. Gate 2 is `OPEN` and ADR-001 remains `PROPOSED`.
 
 The trial created an **empty nft table only**; it did not create a chain or nft rule. It also created one temporary IPv4 fwmark `ip rule` and one blackhole route. Therefore the trial covers enumeration and foreign-claim rejection for an empty nft table, one rule selector, and one route slot. It does not cover nft chain/rule enumeration, hooked chains, expression parsing, counters, mutation by TEMPEST, or ownership receipts. The private evidence directory was `/tmp/tempest-foreign-f53e7e5e.U8Rsoc` inside the VM; raw feeds must not be copied into Git.
 
@@ -61,6 +61,14 @@ Before seed the target inventory had 6 unproven objects; after seed it had 9. Th
 
 **Actual trial scope:** it created an empty nft table, with no chain or nft rule, plus one IPv4 fwmark rule and one blackhole route. It therefore confirms detection and foreign-claim rejection only for those object shapes. It does not test nft chain/rule enumeration, apply by TEMPEST, proof/receipt continuity, or rollback. Do not infer that those checks passed.
 
+## Failed tracked trial, recovery and single rerun — 2026-11-17
+
+- **FAIL on `be5eab67b76edcc3f5f01881a99d15617ea2c033`.** The baseline had 10 unproven objects. The diagnostic capture after failure contained the baseline plus the three trial objects. The selector validator refused the blackhole route because Linux included `"flags": []`. Cleanup stopped and Registry rejection was never reached. The PID 1 RA route's `expires` increased from 65000 to 65413 over 180 s. The snapshots establish the timer change and leave its cause unverified. The evidence was archived privately on TYPHOON before shutdown.
+- **Recovery.** Verified the offline QCOW2 and domain XML SHA-256 against the manifest, confirmed the defined active disk path and free space, and waited for graceful `shut off`. Saved the failed disk separately. Verified the installed copy by SHA-256 and `qemu-img check` before booting. Verified Ubuntu over SSH and an interactive login prompt on the independent hypervisor graphical console. Recreated `tempest-ns-lab` with only `lo` and no default routes. The target identity `5:4026532543` differed from PID 1 `5:4026531833`. Old trial selectors were absent from both namespaces.
+- **PASS on `b3bb6399ff33524569c62feb234d8a80a3483667`.** Targeted pytest returned 134 passed on both TYPHOON and the VM. `bash -n` and `--dry-run` passed. After the typed confirmation, one `--execute` detected all three additions and the Registry rejected all three claims. Exact cleanup removed the route, rule and empty table. Inventory was 10 before, 13 during and 10 after, with all six target feeds restored byte-for-byte. Five PID 1 feeds were byte-identical. In `route6`, all stable attributes matched and the only difference was the IPv6 RA countdown from 65362 to 65358 over 4.380 s. The compared snapshots showed no stable PID 1 network changes attributable to the trial. The raw captures, their manifests and the terminal log were kept outside Git. The tested commit passed [GitHub CI](https://github.com/GariestGary/tempest/actions/runs/44157909294) and [CodeQL](https://github.com/GariestGary/tempest/actions/runs/44157909311).
+
+The route guard accepts an omitted `flags` field or an empty array. The host route comparator matches complete route records, except for a valid IPv6 RA `expires` value. It reports a countdown bounded by elapsed time plus 2 s, or a separate refresh-compatible increase. Any added or removed route, changed stable attribute, missing timer counterpart or ambiguous match fails the comparison. Independent evidence is required to attribute a timer increase to a Router Advertisement. The rerun observed only a countdown. The refresh-compatible result was verified with regression tests and offline replay of the failed trial's host snapshots.
+
 ## Remaining foreign-object coverage
 
 Task 2.5 review should still add fixture/live inventory coverage for nft chains and rules. Unit tests prove the cleanup guard rejects changed table identity, duplicate table records, and unknown child objects; parser/registry regressions exercise the foreign nft/rule/table/route conflicts. `validate_trial_selectors()` is exercised against realistic Linux JSON fixtures for states `000`, `100`, `110`, `111` and rollback `110 → 100 → 000`. Negative tests cover a foreign rule referencing the trial table ID, priority collision, overlapping fwmark, foreign route, occupied route slot, nft table name/child collision, and duplicate trial rule. A discovered validator bug compared the trial ip rule with route objects, causing the valid `110` state to fail; the validator now compares rules only with matching trial rules. The runner's `--dry-run` and placeholder rejection also have non-mutating regressions. Before any manual rerun, use a fresh VM backup and independently verify outside the guest that the snapshot exists, can be restored, and that the hypervisor console works. The guest cannot verify hypervisor snapshots or console access. Keep all evidence private. Do not copy raw feeds into Git.
@@ -73,15 +81,15 @@ Run only from the VM's main namespace after independently confirming snapshot, r
 
 ```bash
 cd ~/tempest
-TEMPEST_VM_ID=tempest-lab-ubuntu \
+sudo -n env TEMPEST_VM_ID=tempest-lab-ubuntu \
 TEMPEST_SNAPSHOT_ID='REPLACE_WITH_REAL_SNAPSHOT_ID' \
 TEMPEST_SNAPSHOT_VERIFIED=YES \
 TEMPEST_CONSOLE_VERIFIED=YES \
 TEMPEST_ISOLATED_NETWORK_VERIFIED=YES \
-scripts/lab/foreign-ownership-trial.sh --execute
+bash scripts/lab/foreign-ownership-trial.sh --execute
 ```
 
-Replace `REPLACE_WITH_REAL_SNAPSHOT_ID` with the operator-verified identifier before executing. The script prompts for a typed run confirmation, checks target and PID 1 namespace identity, verifies selectors in both namespaces, and then seeds only the empty nft table, IPv4 `ip rule`, and blackhole route. Cleanup remains exact `route → rule → nft table`; before deleting the table it requires the table JSON to contain only that table object. If unknown descendants appear, cleanup stops and directs the operator to restore the snapshot. The output lists any accepted IPv6 RA timer countdown separately.
+Replace `REPLACE_WITH_REAL_SNAPSHOT_ID` with the operator-verified identifier before executing. The script prompts for a typed run confirmation, checks target and PID 1 namespace identity, verifies selectors in both namespaces, and then seeds only the empty nft table, IPv4 `ip rule`, and blackhole route. Cleanup runs in order `route → rule → nft table` and requires the table JSON to contain only that table object before deletion. If unknown descendants appear, cleanup stops and directs the operator to restore the snapshot. The output identifies IPv6 RA countdown and refresh-compatible timer increases separately.
 
 ## Read-only trial, after VM preparation
 
