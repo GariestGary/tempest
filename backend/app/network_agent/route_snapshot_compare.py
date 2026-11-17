@@ -21,8 +21,13 @@ class TimerDrift:
 
 def validate_snapshot_id(value: str) -> str:
     """Reject empty values and common documentation placeholders."""
+    placeholder = {
+        "snapshot", "snapshot-id", "snapshot_id", "placeholder", "todo", "example",
+        "verified", "verified-snapshot-id", "none", "null", "replace-with-real-snapshot-id",
+    }
     if (not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{2,127}", value)
-            or re.search(r"placeholder|snapshot|todo|example|change.?me|replace", value, re.IGNORECASE)):
+            or value.lower() in placeholder
+            or re.search(r"(?:^|[-_.])(?:placeholder|todo|example|change[-_.]?me|replace)(?:$|[-_.])", value, re.IGNORECASE)):
         raise RouteSnapshotMismatch("snapshot ID is empty, malformed, or an obvious placeholder")
     return value
 

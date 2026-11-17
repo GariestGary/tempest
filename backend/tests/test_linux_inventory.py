@@ -266,6 +266,7 @@ def test_snapshot_id_rejects_empty_and_obvious_placeholders(value):
 
 def test_snapshot_id_accepts_operator_identifier():
     assert validate_snapshot_id("lab-backup-2026-11-17-a1b2") == "lab-backup-2026-11-17-a1b2"
+    assert validate_snapshot_id("snapshot-2026-11-17-a1b2") == "snapshot-2026-11-17-a1b2"
 
 
 @pytest.mark.parametrize("feed", ("link", "rule", "route", "nft"))

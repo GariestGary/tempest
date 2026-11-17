@@ -8,7 +8,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BACKEND="$ROOT/backend"
 PYTHON="$BACKEND/.venv/bin/python"
 MODE="${1:---dry-run}"
+validate_snapshot_id() {
+  local snapshot_lower="${1,,}"
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$ \
+     && ! "$snapshot_lower" =~ ^(snapshot|snapshot[-_]id|placeholder|todo|example|verified|none|null|replace-with-real-snapshot-id)$ \
+     && ! "$snapshot_lower" =~ (^|[-_.])(placeholder|todo|example|change[-_.]?me|replace)([-_.]|$) ]]
+}
 if [[ "$MODE" == --dry-run ]]; then
+  if [[ -v TEMPEST_SNAPSHOT_ID ]] && ! validate_snapshot_id "$TEMPEST_SNAPSHOT_ID"; then
+    echo "Snapshot ID is malformed or an obvious placeholder" >&2; exit 2
+  fi
   cat <<'EOF'
 DRY RUN: no state-changing commands executed.
 Plan: add one empty inet nft table, one IPv4 fwmark rule, and one blackhole
@@ -27,6 +36,9 @@ fi
    && "${TEMPEST_ISOLATED_NETWORK_VERIFIED:-}" == YES ]] || {
   echo "Set VM_ID=tempest-lab-ubuntu, SNAPSHOT_ID, and VERIFIED=YES attestations after out-of-band checks" >&2; exit 2;
 }
+validate_snapshot_id "$TEMPEST_SNAPSHOT_ID" || {
+  echo "Snapshot ID is empty, malformed, or an obvious placeholder" >&2; exit 2;
+}
 [[ -x "$PYTHON" && -e "/run/netns/$NS" ]] || { echo "Python venv or pre-created target namespace unavailable" >&2; exit 2; }
 for bin in ip nft stat sha256sum diff mktemp od cmp; do command -v "$bin" >/dev/null || { echo "Missing command: $bin" >&2; exit 2; }; done
 
@@ -43,29 +55,65 @@ PRIORITY="$((32000 + 16#${SUFFIX:0:3} % 700))"
 MARK="0x7e${SUFFIX:0:6}"
 ROUTE_TABLE="$((20000 + 16#${SUFFIX:2:4} % 20000))"
 PREFIX=198.18.0.0/15
+ROUTE_METRIC=42420
 EVIDENCE="$(mktemp -d "${TMPDIR:-/tmp}/tempest-foreign-${SUFFIX}.XXXXXX")"
 chmod 700 "$EVIDENCE"
 CREATED_TABLE=0 CREATED_RULE=0 CREATED_ROUTE=0
 target() { ip netns exec "$NS" "$@"; }
 
 # Check exact selectors in either the prepared namespace or PID 1 namespace.
+combine_arrays() {
+  "$PYTHON" -c 'import json,sys; a=json.loads(sys.argv[1]); b=json.loads(sys.argv[2]); assert isinstance(a,list) and isinstance(b,list); print(json.dumps(a+b))' "$1" "$2"
+}
 check_selectors() {
   local where="$1" expected="$2" rules routes nftout
   if [[ "$where" == target ]]; then
-    rules="$(target ip -4 -j rule)"; routes="$(target ip -4 -j route show table all)"; nftout="$(target nft -j list ruleset)"
+    rules="$(combine_arrays "$(target ip -4 -j rule)" "$(target ip -6 -j rule)")"
+    routes="$(combine_arrays "$(target ip -4 -j route show table all)" "$(target ip -6 -j route show table all)")"
+    nftout="$(target nft -j list ruleset)"
   else
-    rules="$(ip -4 -j rule)"; routes="$(ip -4 -j route show table all)"; nftout="$(nft -j list ruleset)"
+    rules="$(combine_arrays "$(ip -4 -j rule)" "$(ip -6 -j rule)")"
+    routes="$(combine_arrays "$(ip -4 -j route show table all)" "$(ip -6 -j route show table all)")"
+    nftout="$(nft -j list ruleset)"
   fi
-  RULES="$rules" ROUTES="$routes" NFT="$nftout" EXPECT="$expected" TABLE="$TABLE" PRIORITY="$PRIORITY" MARK="$MARK" ROUTE_TABLE="$ROUTE_TABLE" PREFIX="$PREFIX" \
+  RULES="$rules" ROUTES="$routes" NFT="$nftout" EXPECT="$expected" TABLE="$TABLE" PRIORITY="$PRIORITY" MARK="$MARK" ROUTE_TABLE="$ROUTE_TABLE" PREFIX="$PREFIX" ROUTE_METRIC="$ROUTE_METRIC" \
     "$PYTHON" -c 'import json,os,sys
 r=json.loads(os.environ["RULES"]); q=json.loads(os.environ["ROUTES"]); n=json.loads(os.environ["NFT"])
-t=sum((x.get("family"),x.get("name"))==("inet",os.environ["TABLE"]) for e in n.get("nftables",[]) for x in [e.get("table",{})] if x)
 p=int(os.environ["PRIORITY"]); m=int(os.environ["MARK"],0); tab=int(os.environ["ROUTE_TABLE"]); dst=os.environ["PREFIX"]
-rule=sum(int(x.get("priority",x.get("pref",-1)))==p and int(str(x.get("fwmark","0")),0)==m and int(x.get("table",-1))==tab for x in r)
-route=sum(x.get("dst")==dst and int(x.get("table",-1))==tab and x.get("type")=="blackhole" for x in q)
-if any(x>1 for x in (t,rule,route)): sys.exit("ambiguous duplicate trial selector")
-found=(t,rule,route); want=tuple(c=="1" for c in os.environ["EXPECT"])
-if found!=want: sys.exit("selector conflict or unexpected trial state: "+repr(found))' 2>/dev/null
+want=tuple(c=="1" for c in os.environ["EXPECT"])
+def table_id(x):
+ v=x.get("table")
+ v={"local":255,"main":254,"default":253}.get(v,v)
+ return int(v) if isinstance(v,str) and v.isdecimal() else v
+if not isinstance(r,list) or not isinstance(q,list) or not isinstance(n.get("nftables"),list): raise ValueError("incomplete selector inventory")
+tables=[]
+for e in n["nftables"]:
+ if not isinstance(e,dict) or len(e)!=1: raise ValueError("ambiguous nft object")
+ kind,x=next(iter(e.items()))
+ if kind not in {"metainfo","table","chain","rule","set","map","element","counter","quota","flowtable"}: raise ValueError("unknown nft object")
+ own_table=kind=="table" and x.get("family")=="inet" and x.get("name")==os.environ["TABLE"]
+ if own_table: tables.append(e)
+ if kind!="metainfo" and not own_table and x.get("family")=="inet" and (x.get("table")==os.environ["TABLE"] or (kind=="table" and x.get("name")==os.environ["TABLE"])): raise ValueError("nft table name or child selector occupied")
+if any(not isinstance(x,dict) for x in r+q): raise ValueError("ambiguous ip object")
+priority_rows=[x for x in r if int(x.get("priority",x.get("pref",-1)))==p]
+def mark_value(x,k,default):
+ v=x.get(k,default); return int(str(v),0)
+overlaps=[]
+for x in r:
+ em=mark_value(x,"fwmark",0); mask=mark_value(x,"fwmask",0xffffffff)
+ if (m & mask)==(em & mask): overlaps.append(x)
+table_rules=[x for x in r if table_id(x)==tab]
+table_routes=[x for x in q if table_id(x)==tab]
+rule_trial=[x for x in priority_rows if mark_value(x,"fwmark",0)==m and mark_value(x,"fwmask",0xffffffff)==0xffffffff and table_id(x)==tab]
+route_slots=[x for x in q if x.get("dst")==dst and table_id(x)==tab]
+route_trial=[x for x in route_slots if x.get("type")=="blackhole" and int(x.get("metric",x.get("priority",0)))==int(os.environ["ROUTE_METRIC"]) and x.get("protocol")=="static"]
+if len(tables)>1 or len(rule_trial)>1 or len(route_trial)>1: raise ValueError("ambiguous duplicate trial selector")
+if len(tables)!=want[0] or len(rule_trial)!=want[1] or len(route_trial)!=want[2]: raise ValueError("selector collision or unexpected trial state")
+if any(x not in rule_trial for x in priority_rows): raise ValueError("ip rule priority already occupied")
+if any(x not in rule_trial for x in overlaps): raise ValueError("fwmark overlaps an existing ip rule")
+if any(x not in route_trial for x in table_rules): raise ValueError("routing table ID is referenced by another ip rule")
+if any(x not in route_trial for x in table_routes): raise ValueError("routing table ID contains another route")
+if any(x not in route_trial for x in route_slots): raise ValueError("route destination/table slot is occupied by another route")'
 }
 preflight() {
   local expect="${CREATED_TABLE}${CREATED_RULE}${CREATED_ROUTE}"
@@ -92,7 +140,7 @@ confirm="RUN $NS $SUFFIX"; echo "Type exactly '$confirm' to continue:"; IFS= rea
 cleanup() {
   local rc=$?; trap - EXIT
   if (( CREATED_ROUTE )); then
-    if ! preflight || ! target ip -4 route del blackhole "$PREFIX" table "$ROUTE_TABLE"; then echo "STOP: exact route cleanup failed; restore snapshot and do not guess further deletes" >&2; exit 1; fi
+    if ! preflight || ! target ip -4 route del blackhole "$PREFIX" table "$ROUTE_TABLE" proto static metric "$ROUTE_METRIC"; then echo "STOP: exact route cleanup failed; restore snapshot and do not guess further deletes" >&2; exit 1; fi
     CREATED_ROUTE=0
   fi
   if (( CREATED_RULE )); then
@@ -100,12 +148,19 @@ cleanup() {
     CREATED_RULE=0
   fi
   if (( CREATED_TABLE )); then
+    if ! preflight || ! ensure_empty_trial_table; then echo "STOP: nft table has unknown children; refusing table deletion; restore snapshot and do not guess further deletes" >&2; exit 1; fi
     if ! preflight || ! target nft delete table inet "$TABLE"; then echo "STOP: exact nft cleanup failed; restore snapshot and do not guess further deletes" >&2; exit 1; fi
     CREATED_TABLE=0
   fi
   exit "$rc"
 }
 trap cleanup EXIT
+
+ensure_empty_trial_table() {
+  target nft -j list table inet "$TABLE" | PYTHONPATH="$BACKEND" "$PYTHON" -c 'import sys
+from app.network_agent.lab_trial_safety import require_empty_nft_table
+require_empty_nft_table(sys.stdin.read(),family="inet",table_name=sys.argv[1])' "$TABLE"
+}
 
 capture() {
   local dest="$1"; preflight
@@ -115,6 +170,7 @@ capture() {
 host_capture() {
   local dest="$1"
   mkdir -m 700 "$dest"
+  date -u +%s.%N >"$dest/captured_at"
   ip -j link >"$dest/link.json"
   ip -4 -j rule >"$dest/rule4.json"; ip -6 -j rule >"$dest/rule6.json"
   ip -4 -j route show table all >"$dest/route4.json"; ip -6 -j route show table all >"$dest/route6.json"
@@ -130,7 +186,7 @@ target nft add table inet "$TABLE"; CREATED_TABLE=1
 preflight
 target ip -4 rule add priority "$PRIORITY" fwmark "$MARK" lookup "$ROUTE_TABLE"; CREATED_RULE=1
 preflight
-target ip -4 route add blackhole "$PREFIX" table "$ROUTE_TABLE"; CREATED_ROUTE=1
+target ip -4 route add blackhole "$PREFIX" table "$ROUTE_TABLE" proto static metric "$ROUTE_METRIC"; CREATED_ROUTE=1
 preflight
 capture "$EVIDENCE/seeded-1"
 capture "$EVIDENCE/seeded-2"
@@ -174,14 +230,30 @@ print('PASS: collector returned three unproven foreign objects; registry rejecte
 PY
 
 # Exact reverse cleanup; each deletion has fresh identity/selector/cleanup preflight.
-preflight; target ip -4 route del blackhole "$PREFIX" table "$ROUTE_TABLE"; CREATED_ROUTE=0
+preflight; target ip -4 route del blackhole "$PREFIX" table "$ROUTE_TABLE" proto static metric "$ROUTE_METRIC"; CREATED_ROUTE=0
 preflight; target ip -4 rule del priority "$PRIORITY" fwmark "$MARK" lookup "$ROUTE_TABLE"; CREATED_RULE=0
-preflight; target nft delete table inet "$TABLE"; CREATED_TABLE=0
+preflight; ensure_empty_trial_table; target nft delete table inet "$TABLE"; CREATED_TABLE=0
 preflight
 capture "$EVIDENCE/after"
 host_capture "$EVIDENCE/host-after"
 for feed in link rule4 rule6 route4 route6 nft; do
   cmp -s "$EVIDENCE/baseline/$feed.json" "$EVIDENCE/after/$feed.json" || { echo "Target baseline mismatch after cleanup: $feed" >&2; exit 1; }
-  cmp -s "$EVIDENCE/host-before/$feed.json" "$EVIDENCE/host-after/$feed.json" || { echo "PID 1 namespace changed: $feed" >&2; exit 1; }
+  if [[ "$feed" != route6 ]]; then
+    cmp -s "$EVIDENCE/host-before/$feed.json" "$EVIDENCE/host-after/$feed.json" || { echo "PID 1 namespace changed: $feed" >&2; exit 1; }
+  fi
 done
+PYTHONPATH="$BACKEND" "$PYTHON" - "$EVIDENCE/host-before/route6.json" "$EVIDENCE/host-after/route6.json" \
+  "$(cat "$EVIDENCE/host-before/captured_at")" "$(cat "$EVIDENCE/host-after/captured_at")" <<'PY'
+import sys
+from pathlib import Path
+from app.network_agent.route_snapshot_compare import compare_route_snapshots
+before,after,before_at,after_at=sys.argv[1:]
+elapsed=float(after_at)-float(before_at)
+drifts=compare_route_snapshots(Path(before).read_text(),Path(after).read_text(),family="inet6",elapsed_seconds=elapsed,timer_slack_seconds=2.0)
+if drifts:
+ print("Allowed IPv6 RA timer drift(s):")
+ for drift in drifts: print(f"  expires {drift.before_expires} -> {drift.after_expires}; elapsed {drift.elapsed_seconds:.3f}s; route={drift.route}")
+else:
+ print("Host IPv6 route snapshot unchanged.")
+PY
 echo "PASS: cleanup and target/PID1 before-after feeds match. Private evidence: $EVIDENCE"

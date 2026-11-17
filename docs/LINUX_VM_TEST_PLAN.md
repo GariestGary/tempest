@@ -63,9 +63,25 @@ Before seed the target inventory had 6 unproven objects; after seed it had 9. Th
 
 ## Remaining foreign-object coverage
 
-Task 2.5 review should add fixture coverage for nft chains and rules, unknown nft child safety during cleanup, and positive/negative `--dry-run` cases for every selector collision. Before any manual rerun, use a fresh VM backup and independently verify outside the guest that the snapshot exists, can be restored, and that the hypervisor console works. The guest cannot verify hypervisor snapshots or console access. Keep all evidence private. Do not copy raw feeds into Git.
+Task 2.5 review should still add fixture/live inventory coverage for nft chains and rules. Unit tests now prove the cleanup guard rejects changed table identity, duplicate table records, and unknown child objects; parser/registry regressions exercise the foreign nft/rule/table/route conflicts. The runner's `--dry-run` and placeholder rejection also have non-mutating regressions. Before any manual rerun, use a fresh VM backup and independently verify outside the guest that the snapshot exists, can be restored, and that the hypervisor console works. The guest cannot verify hypervisor snapshots or console access. Keep all evidence private. Do not copy raw feeds into Git.
 
-The checkout inspected for this update does not contain `scripts/lab/foreign-ownership-trial.sh` in HEAD or Git history, despite the operator's reported path. Do not assume the reported runner is equivalent to a tracked script; reconcile this before using the exact commands below. No `--execute` was run during this code/documentation update.
+The updated tracked runner is `scripts/lab/foreign-ownership-trial.sh`. Its default `--dry-run` performs no state-changing commands. Before a manual `--execute`, verify the snapshot exists, recovery is possible, and independent hypervisor console is available outside the guest; then set the attestation environment variables as shown below. The script cannot technically inspect the hypervisor snapshot or console from inside Ubuntu.
+
+## Manual final VM trial command
+
+Run only from the VM's main namespace after independently confirming snapshot, restore path, isolated network and virt-manager console. Use the actual snapshot identifier; empty values and obvious placeholder strings are rejected. Do not run `--execute` as part of local CI or from TYPHOON/VORTEX.
+
+```bash
+cd ~/tempest
+TEMPEST_VM_ID=tempest-lab-ubuntu \
+TEMPEST_SNAPSHOT_ID='REPLACE_WITH_REAL_SNAPSHOT_ID' \
+TEMPEST_SNAPSHOT_VERIFIED=YES \
+TEMPEST_CONSOLE_VERIFIED=YES \
+TEMPEST_ISOLATED_NETWORK_VERIFIED=YES \
+scripts/lab/foreign-ownership-trial.sh --execute
+```
+
+Replace `REPLACE_WITH_REAL_SNAPSHOT_ID` with the operator-verified identifier before executing. The script prompts for a typed run confirmation, checks target and PID 1 namespace identity, verifies selectors in both namespaces, and then seeds only the empty nft table, IPv4 `ip rule`, and blackhole route. Cleanup remains exact `route → rule → nft table`; before deleting the table it requires the table JSON to contain only that table object. If unknown descendants appear, cleanup stops and directs the operator to restore the snapshot. The output lists any accepted IPv6 RA timer countdown separately.
 
 ## Read-only trial, after VM preparation
 
