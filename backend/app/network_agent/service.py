@@ -1,4 +1,4 @@
-"""AF_UNIX transport for the mock Agent and the opt-in lab table Agent."""
+"""Shared AF_UNIX transport for TEMPEST Agents."""
 
 from __future__ import annotations
 
@@ -277,6 +277,12 @@ def main() -> None:
     parser.add_argument("--lab-boot-id")
     parser.add_argument("--lab-netns", help="preflight target namespace device:inode")
     parser.add_argument("--lab-host-netns", help="preflight PID 1 namespace device:inode")
+    parser.add_argument("--xray", type=Path, help="enable the isolated Xray backend with this pinned binary")
+    parser.add_argument("--xray-state", type=Path)
+    parser.add_argument("--xray-runtime", type=Path)
+    parser.add_argument("--xray-netns")
+    parser.add_argument("--xray-listen")
+    parser.add_argument("--xray-port", type=int)
     args = parser.parse_args()
     if args.allowed_uids is None or args.allowed_gids is None:
         parser.error("allowed UID and GID lists must be configured explicitly")
@@ -287,6 +293,36 @@ def main() -> None:
         expected_cgroup=args.expected_cgroup or None,
     )
     lab_options = (args.lab_table, args.lab_journal, args.lab_boot_id, args.lab_netns, args.lab_host_netns)
+    xray_options = (args.xray, args.xray_state, args.xray_runtime, args.xray_netns,
+                    args.xray_listen, args.xray_port)
+    if any(option is not None for option in xray_options):
+        if any(lab_options) or not all(xray_options) or not Path(args.socket).is_absolute():
+            parser.error("Xray uses its own socket and requires all deployment settings")
+        from ipaddress import ip_address
+        import re
+
+        from .xray_agent import XrayAgent, XrayJournal
+        from .xray_profile import parse_xray_request
+        from .xray_runtime import SystemdXray, XrayRuntimeError
+
+        try:
+            if not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", args.xray_netns):
+                raise ValueError("invalid provisioned Xray namespace name")
+            listen = ip_address(args.xray_listen)
+            if not 1024 <= args.xray_port <= 65535:
+                raise ValueError("invalid provisioned Xray UDP port")
+            socket_parent = Path(args.socket).parent.stat()
+            if socket_parent.st_uid != os.geteuid() or socket_parent.st_mode & 0o022:
+                raise ValueError("Xray socket directory must be Agent-owned and protected")
+            runtime = SystemdXray(args.xray, args.xray_runtime, args.xray_state, args.xray_netns)
+            with XrayJournal(args.xray_state) as journal:
+                agent = XrayAgent(runtime, journal, namespace=args.xray_netns,
+                                  listener=(str(listen), args.xray_port))
+                serve(args.socket, agent=agent, parse_request=parse_xray_request,
+                      maintain=agent.maintain, **peer_options)
+        except (OSError, ValueError, XrayRuntimeError) as exc:
+            parser.error(str(exc))
+        return
     if not any(option is not None for option in lab_options):
         serve(args.socket, **peer_options)
         return

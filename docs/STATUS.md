@@ -1,5 +1,13 @@
 # TEMPEST — статус форка
 
+## 2026-11-18 · утверждённый Xray MVP и первый реальный lifecycle
+
+Владелец принял A/B в проверенных границах и утвердил Xray 26.10.31. Kernel WireGuard, TUN/TPROXY, универсальные nftables/IP routes и расширение Registry вынесены за критический путь MVP. Принятые задачи 2.1–2.5 и table-only срез сохранены.
+
+На согласованной VM профиль WG → DIRECT/VLESS/BLOCK применён через реальный Xray Agent и AF_UNIX CLI. Проверены живой трафик, права gateway, rollback, восстановление подтверждённого LKG при рестарте, коллизия UDP и закрытие ingress при несовместимом с отзывом ключа LKG. Подробнее о границах проверки и требованиях к запуску — в [отчёте Xray lifecycle](XRAY_MVP_LIFECYCLE.md).
+
+Task 2.6 `IN_PROGRESS`, Gate 2 `OPEN`, ADR-001 `PROPOSED`. Reboot и поставляемое окружение требуют отдельной проверки.
+
 ## 2026-11-18 · userspace dataplane A/B для задачи 2.6
 
 В disposable VM оба закреплённых движка приняли реальный WireGuard-клиент и применили ручные DIRECT/VLESS/BLOCK для IPv4/IPv6, TCP/UDP и DNS. Gateway работал без capabilities и TUN. При остановке upstream или gateway защищённый трафик не ушёл напрямую. Контрольные пробы достигали тех же назначений прямым путём. При снятии WG-маршрутов клиент без kill-switch использовал нативный путь.

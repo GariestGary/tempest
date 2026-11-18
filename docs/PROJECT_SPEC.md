@@ -1,6 +1,6 @@
 # TEMPEST — спецификация продукта и поэтапный план разработки
 
-> **Статус:** этапы 0/1 приняты. Этап 2 `IN_PROGRESS`, задачи 2.1–2.5 приняты владельцем. Первый лабораторный срез 2.6 принят владельцем. Реальное исполнение v1 заблокировано требованием default block. Gate 2 `OPEN`. Актуальная сводка — §15.
+> **Статус:** этапы 0/1 приняты. Этап 2 `IN_PROGRESS`, задачи 2.1–2.5 приняты владельцем. Первый лабораторный срез 2.6 и результаты userspace A/B приняты владельцем. Основной движок MVP — Xray 26.10.31. Gate 2 `OPEN`. Актуальная сводка — §15.
 > **Дата исходного решения:** 2026-11-10.  
 > **Название продукта:** **TEMPEST** (без «2», «3», «Next» и других версий в имени).  
 > **База:** форк [DaveBugg/PiTun](https://github.com/DaveBugg/PiTun), ветка upstream `master`.  
@@ -18,7 +18,7 @@
 
 **При первичной работе с ещё не базированным проектом:** разрешён **только этап 0**. Сначала изучить исходный код PiTun и зафиксировать baseline. TEMPEST уже прошёл и принял этапы 0 и 1; действующую авторизацию брать из §15. Не переписывать backend, не менять firewall хоста и не разворачивать сервисы на VORTEX без отдельного разрешённого этапа.
 
-Этапы 0 и 1 приняты владельцем. Этап 1 принят по успешному [GitHub Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`. Задачи 2.1–2.3 приняты после ревью и CI, как записано в §15. Владелец принял задачу 2.4 после ревью `6cbb73b22146ccba1ad123183e4e147dc8f59f2b` и успешного CI #26. Первый срез 2.5 принят после review `07cdc1701152d1220c02c8429009507d4ed287e4` и CI #27. Владелец принял 2.5 в проверенных границах 2026-11-17. Результаты FAIL, восстановления и успешного повтора VM trial приведены в §17. Владелец принял [первый лабораторный срез 2.6](TASK_2_6_FIRST_NFT_TABLE.md) для одной пустой таблицы. Переход к реальному v1 требует [исполняемой блокировки protected ingress](NETWORK_PLAN_IPC.md#первый-реальный-срез-v1).
+Этапы 0 и 1 приняты владельцем. Этап 1 принят по успешному [GitHub Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356`. Задачи 2.1–2.3 приняты после ревью и CI, как записано в §15. Владелец принял задачу 2.4 после ревью `6cbb73b22146ccba1ad123183e4e147dc8f59f2b` и успешного CI #26. Первый срез 2.5 принят после review `07cdc1701152d1220c02c8429009507d4ed287e4` и CI #27. Владелец принял 2.5 в проверенных границах 2026-11-17. Результаты FAIL, восстановления и успешного повтора VM trial приведены в §17. Владелец принял [первый лабораторный срез 2.6](TASK_2_6_FIRST_NFT_TABLE.md) для одной пустой таблицы. Владелец утвердил userspace Xray и снял универсальный kernel backend v1 с критического пути MVP. [Решение и данные A/B](ENGINE_VS_KERNEL_DECISION.md)
 
 Для каждой задачи:
 
@@ -84,6 +84,7 @@
 | D-008 | Текущая система TEMPEST 2 на VORTEX **не заменяется автоматически**; отдельный стенд и явное переключение | **Принято** |
 | D-009 | Автоматическое переключение по **транспортной доступности**, ручные overrides выше AUTO; DIRECT fallback только если разрешён явно | **Принято** |
 | D-010 | Этапы выполняются строго последовательно, завершение подтверждает пользователь | **Принято** |
+| D-011 | Xray 26.10.31 для userspace WG → DIRECT/VLESS/BLOCK. Stage 2 использует lifecycle конфигурации движка. Kernel WG, TUN/TPROXY, универсальные nftables/IP routes и расширение Registry вынесены за критический путь MVP | **Принято** |
 
 **Не путать:** выбор egress «US», «NL», «PL» по вручную заданному правилу — нужная функция. Ненужная функция — автоматически распознавать, что сайт открылся, но его музыка/видео/API географически недоступны.
 
@@ -199,46 +200,45 @@
 
 FastAPI/React/SQLite Control Plane остаётся отдельным непривилегированным компонентом. Он не получает Linux capabilities, host PID/network, Docker socket или системные mounts и не вызывает `nft`, `ip`, `nsenter`, `sudo` либо произвольный shell для изменения сети.
 
-Основной кандидат — Network Agent и dataplane в заранее созданном выделенном Linux network namespace. Сначала проверить, достаточно ли полномочий внутри этого namespace для конкретных операций. **Systemd Agent в host network namespace — запасной вариант**, только если эксперимент выявит необходимую host-only операцию и её нельзя выполнить через выделенный namespace. Это кандидаты для испытаний, не принятое архитектурное решение; ADR-001 остаётся `PROPOSED` до Linux VM испытаний.
+Для MVP утверждён userspace gateway Xray в заранее подготовленном выделенном network namespace. Конфигурационный Agent и Xray используют отдельные UID и запускаются без capabilities. AF_UNIX доступен Control Plane; управление фиксированными unit делегируется только Agent через polkit. Топология и публикация ingress остаются операторским provisioning. ADR-001 остаётся `PROPOSED` до проверки поставляемой архитектуры. [Контракт Xray lifecycle](XRAY_MVP_LIFECYCLE.md)
 
 Требования к границе:
 
-- Agent — отдельный процесс/lifecycle с минимальным UID и полномочиями. `CAP_NET_ADMIN` — только кандидат для собственного сетевого namespace; `CAP_NET_RAW`, `CAP_NET_BIND_SERVICE` и доступ к `/dev/net/tun` не выдаются без проверенного требования. Agent не получает `CAP_SYS_ADMIN`. Загрузка модулей и создание/переключение namespace остаются setup/preflight задачами.
-- Между Control Plane и Agent — локальный Unix socket с типизированными запросами `validate`, `stage`, `diff`, `apply`, `confirm`, `rollback`, `read_status`. Сообщение само по себе не аутентифицирует вызывающего: Agent проверяет kernel peer credentials (`SO_PEERCRED`), владельца socket path, allowlist UID/GID и привязку к разрешённому сервису/cgroup. Actor для audit выводится из проверенных transport credentials, а не принимается из JSON.
+- Agent — отдельный процесс/lifecycle с минимальным UID и полномочиями. Для kernel-профилей вне текущего MVP `CAP_NET_ADMIN` — только кандидат для собственного сетевого namespace; `CAP_NET_RAW`, `CAP_NET_BIND_SERVICE` и доступ к `/dev/net/tun` не выдаются без проверенного требования. Agent не получает `CAP_SYS_ADMIN`. Загрузка модулей и создание/переключение namespace остаются setup/preflight задачами.
+- Между Control Plane и Agent — локальный Unix socket с типизированными запросами `validate`, `stage`, `diff`, `apply`, `verify`, `confirm`, `rollback`, `read_status`. Сообщение само по себе не аутентифицирует вызывающего: Agent проверяет kernel peer credentials (`SO_PEERCRED`), владельца socket path, allowlist UID/GID и привязку к разрешённому сервису/cgroup. Actor для audit выводится из проверенных transport credentials, а не принимается из JSON.
 - IPC ограничивает размер frame, timeout и частоту запросов, использует protocol version, request ID, generation ID и строгую JSON schema с отказом от неизвестных полей/операций. Сериализация не использует pickle. От повторного/конкурирующего apply защищают монотонная generation, fingerprint, base generation и transaction lock.
-- `NetworkPlan` задаёт полное декларативное состояние только объектов TEMPEST в указанном namespace. Операции типизированы; в контракте нет `exec(command: string)`, nft text, произвольных путей/environment или параметров systemd/SSH.
+- Отдельный kernel-контракт `NetworkPlan` задаёт полное декларативное состояние только объектов TEMPEST в указанном namespace. Операции типизированы; в контракте нет `exec(command: string)`, nft text, произвольных путей/environment или параметров systemd/SSH.
 - Stage не меняет активную сеть. Apply допустим только после валидации плана с хотя бы одним разрешённым egress; без допустимого egress защищённый поток остаётся закрытым. Каждая pending generation имеет срок подтверждения и last-known-good; timeout, потеря IPC или reboot до подтверждения восстанавливают последнюю подтверждённую generation, а при неудаче восстановления сохраняют блокировку защищённого трафика.
 - Реестр ownership, pending transaction и last-known-good не доступны на запись Control Plane. Чужие firewall/route/interface objects не меняются. Из области Agent исключены host default route, системный resolver, глобальный firewall flush, Docker API и автоматическое наследование привилегий PiTun.
 - Если безопасная граница Agent не доказана, остаётся proxy-only/dev mock без сетевых изменений. Схемы и Linux-only A/B эксперимент: [NetworkPlan / IPC](NETWORK_PLAN_IPC.md).
 
 ### 5.3. Data Plane
 
-- Сохранить Xray как исходный основный proxy engine; поверх него сделать стабильный контракт `EgressAdapter` / `IngressAdapter`.
+- Xray 26.10.31 завершает WireGuard в userspace, применяет DIRECT/VLESS/BLOCK и открывает обычные сокеты. Сначала реализуется узкий `XrayPlan` и lifecycle. Расширение на другие движки обсуждается отдельно.
 - WG/AWG могут требовать отдельных движков/сервисов (`wireguard-tools`, kernel module, `amneziawg-go` и т. п.). **Не объявлять AWG эквивалентом Xray WireGuard**: параметры обфускации и реализация отличаются.
-- Для VLESS/Hysteria2 использовать Xray, если текущая версия и формат поддерживают нужный режим; sing-box — подключать как отдельный адаптер там, где обосновано. Проверять совместимость форматов и бинарников до выбора движка.
+- MVP использует VLESS поверх TCP/TLS через Xray. sing-box остаётся альтернативой вне MVP. Совместимость Hysteria2 и других режимов проверяется отдельно.
 - Разделить «провайдер/конфигурация» (хранится в Control Plane), «выход» (engine adapter) и «маршрут» (policy). Правило не должно зависеть от конкретного формата `.conf` или JSON Xray.
 - Поддерживать безопасное обновление конфигов без разрушения всех существующих соединений там, где протокол/engine предоставляет runtime API. Если нужен рестарт — UI честно указывает краткий перерыв.
 
 ### 5.4. DNS и маршрутизация
 
 - DNS-резолвинг и классификация доменных правил должны быть согласованы. Определить, где происходит DNS lookup/sniffing, как учитываются CNAME, IPv4/IPv6, кеш и TTL. Проверить DoH/Private DNS клиентов: нельзя обещать обнаружение домена, если его не видно шлюзу.
-- Воспрепятствовать маршрутизационным петлям: mark/exempt трафик самих движков, собственные контрольные запросы, локальный LAN и доступ к панели.
+- В userspace профиле движок завершает ingress и открывает собственные исходящие сокеты. Проверить отсутствие петель и системного DNS fallback. Маркировка/исключения для прозрачного захвата относятся к отдельному профилю.
 - IPv6: **никаких неявных утечек**. Либо полноценная поддержка IPv6 в policy/kill-switch, либо явный контролируемый режим отключения/блокировки IPv6 для защищённых потоков; не выключать IPv6 всего хоста без разрешения.
 - Маршрутизировать в первую очередь **трафик управляемых ingress-клиентов** и только явно выбранных LAN-устройств, не переписывая маршруты процессов самого VORTEX.
 - При совпадении правил результат должен быть детерминирован и отображаться в Route Explainer. Предварительная модель приоритетов: safety/локальные исключения → точные пользовательские правила для устройства/домена → списки/группы → default; окончательную семантику подтвердить ADR + тестами конфликтов.
 
 ### 5.5. Безопасное применение
 
-Минимальный контракт:
+Минимальный контракт для MVP:
 
-1. Сформировать декларативный `NetworkPlan` из проверенных настроек.
-2. `validate`: синтаксис, коллизии интерфейсов/портов/марок/таблиц, доступность бинарников, наличие rollback snapshot.
-3. `stage`: создать кандидат-конфиг и план diff без изменения текущих правил.
-4. `apply`: атомарно либо с управляемыми транзакциями применить **только свои** объекты.
-5. `verify`: проверить доступность Control Plane/SSH, egress loop prevention, отсутствие неожиданных изменений чужих таблиц, состояние критических клиентов.
-6. `confirm`: пользователь/контрольный канал подтверждает; иначе `rollback` с таймаутом, включая восстановление после перезапуска агента/хоста.
+1. Проверить семантику `XrayPlan` и сгенерировать узкий профиль из доверенного шаблона. Явный default BLOCK, разрешённый DNS идёт через VLESS, DIRECT только по конкретному правилу.
+2. `validate → stage → diff` проверяют кандидат отдельным `xray run -test` и не заменяют рабочий файл.
+3. `apply` записывает durable intent и список отозванных ключей, атомарно применяет конфиг и запускает фиксированный unit.
+4. `verify` проверяет активное поколение и реальные WG/TCP/UDP/DNS пути. `confirm` закрепляет успешно проверенное поколение, `rollback` отменяет pending.
+5. При timeout, restart или reboot восстанавливается безопасный подтверждённый LKG. Если запуск, проверка или запрет отозванного peer исключают LKG, ingress закрыт.
 
-Рекомендации должны быть проверены на Linux VM с отрицательными тестами, а не только Python mocks. В случае «все выходы упали» защищённый маршрут остаётся заблокированным (fail-closed), если пользователь явно не разрешил DIRECT в fallback.
+На Linux VM проверяются наблюдаемый путь пакета, неизменность сети PID 1 и доступность независимой консоли/SSH. Принятый table-only срез и kernel ownership контракт ведутся отдельно. [Xray lifecycle](XRAY_MVP_LIFECYCLE.md)
 
 ---
 
@@ -495,11 +495,9 @@ class IngressAdapter(Protocol):
 
 ## 15. Пошаговый план реализации и отслеживание прогресса
 
-**Текущий этап: `2 — Безопасная граница привилегий и NetworkPlan`.**
+**Текущий этап: `2 — Безопасная граница привилегий и lifecycle Xray`.**
 **Общий статус: `IN_PROGRESS`. Этап 1 и задачи 2.1–2.5 приняты владельцем. Задача 2.6 `IN_PROGRESS`.**
-**Правило.** [Срез одной пустой nftables table](TASK_2_6_FIRST_NFT_TABLE.md) принят в проверенных границах на disposable VM в `tempest-ns-lab`. Первый реальный v1 срез требует согласованного исполнения всех обязательных операций. Контрактный блокер и проект LKG описаны в [NetworkPlan / IPC](NETWORK_PLAN_IPC.md#первый-реальный-срез-v1). Задачи 2.7–2.8 и этап 3 требуют отдельного подтверждения. Gate 2 `OPEN`.
-
-**Userspace A/B.** Владелец приостановил план block + dummy и разрешил эксперимент в отдельном disposable стенде. [Результаты A/B и проект редакции 2.6–2.8 и Gate 2](ENGINE_VS_KERNEL_DECISION.md) вынесены на ревью. Действующие критерии приведены ниже.
+**Правило.** [Срез одной пустой nftables table](TASK_2_6_FIRST_NFT_TABLE.md) принят в проверенных границах. Владелец принял [A/B](ENGINE_VS_KERNEL_DECISION.md), утвердил Xray 26.10.31 для MVP и редакцию задач 2.6–2.8 ниже. Kernel NetworkPlan v1 и дальнейшие kernel managers вынесены за критический путь. Выполнение 2.7–2.8, reboot и этап 3 требуют отдельного разрешения. Gate 2 `OPEN`.
 
 ### Сводка фаз
 
@@ -507,7 +505,7 @@ class IngressAdapter(Protocol):
 |---:|---|---|---|
 | 0 | Форк, аудит и исходный baseline | **ACCEPTED** | [Baseline и проверки](UPSTREAM_BASELINE.md), [риски](HOST_PRIVILEGE_AUDIT.md), [gap matrix](TEMPEST_GAP_MATRIX.md), [ADR-001](adr/ADR-001-privilege-separation.md) |
 | 1 | Воспроизводимая dev/test-среда и safe mode | **ACCEPTED** | Владелец принял по [Actions run #5](https://github.com/GariestGary/tempest/actions/runs/42783278332), commit `38fec1220c250b3b398e9160842e301d92d9d356` |
-| 2 | Privilege separation и безопасный NetworkPlan | **IN_PROGRESS** | 2.1–2.5 `ACCEPTED`, первый лабораторный срез 2.6 `ACCEPTED`, первый реальный v1 срез заблокирован обязательным default block, задача 2.6 `IN_PROGRESS`, Gate 2 `OPEN` |
+| 2 | Privilege separation и безопасный lifecycle Xray | **IN_PROGRESS** | 2.1–2.5, table-only срез 2.6 и userspace A/B приняты в проверенных границах. 2.6 `IN_PROGRESS`, Gate 2 `OPEN` |
 | 3 | Сущности Provider/Endpoint/Group и архитектура adapters | BLOCKED | Динамическая модель и совместимость с PiTun узлами |
 | 4 | Egress WG/AWG/VLESS (и DIRECT) | BLOCKED | Рабочие исходящие методы проверены end-to-end |
 | 5 | Policy Engine, DNS и fail-closed routing | BLOCKED | Ручное правило управляет тестовым потоком без утечек |
@@ -553,22 +551,22 @@ class IngressAdapter(Protocol):
 
 ### ЭТАП 2 — Безопасная граница привилегий и операции с сетью (`IN_PROGRESS`; транзакция для одной пустой таблицы принята)
 
-**Цель:** отказаться от широкого доступа PiTun Control Plane к хосту, сохранив возможность **управлять своими** маршрутами.
+**Цель:** управлять маршрутизацией WG-клиентов через изолированный userspace Xray и транзакции конфигурации с безопасным восстановлением.
 
 - [x] 2.1. Спроектировать и первоначально проверить versioned `NetworkPlan`, типизированные операции, serialization/validators, privilege-free mock `NetworkAgent` и typed local Unix IPC contract; описать peer authentication/audit и Linux-only A/B experiment. Принята владельцем после review `be061d9` и успешного CI run #10.
 - [x] 2.2. Выделить Linux Agent как самостоятельный systemd service и AF_UNIX IPC с `SO_PEERCRED`, ограниченным framing/replay и typed contract; оставить сетевые операции no-op/mock. Подготовить unit с отдельной identity, пустым набором capabilities и строгим sandbox. Задача `ACCEPTED` владельцем после review `91fb2c63a5204b1a16fb960a718108aae5e4d3e9` и успешного CI; effective capabilities запущенного unit, cgroup mapping и namespace-scoped service поведение остаются непроверенными.
 - [x] 2.3. `ACCEPTED` владельцем после review commit `2751d160b4a1cc197d5d2c92a81e8451d0bdd482` и успешного CI run #24: инвентаризированы вызовы Control Plane, закрыты legacy обходы Agent mode на HTTP и сервисных границах, добавлены typed dispatch поддержанных inspection операций и DB-derived NetworkPlan, неподдерживаемые операции fail closed. Реальный сетевой apply, ownership registry, транзакции и rollback не входят в 2.3; см. уточнение границ ниже.
 - [x] 2.4. `ACCEPTED` владельцем после review `6cbb73b22146ccba1ad123183e4e147dc8f59f2b` и успешного CI #26: отдельная Agent Compose-конфигурация, непривилегированный Dockerfile target, static audit и fail-closed platform regression tests. Локальный полный Windows pytest остался `INCOMPLETE`; Linux CI прошёл.
 - [x] 2.5. `ACCEPTED` владельцем 2026-11-17 в проверенных границах: первая чистая модель и in-memory backend `ACCEPTED` после review `07cdc1701152d1220c02c8429009507d4ed287e4` и CI #27. Выполнены fixture inventory, live read-only capture, namespace identity mismatch, offline replay и ограниченный повтор foreign-object VM trial. На `b3bb6399ff33524569c62feb234d8a80a3483667` подтверждены `10 → 13 → 10` unproven objects, обнаружение и отказ Registry для всех трёх foreign claims, точечный cleanup и побайтовое восстановление всех шести target feeds. Пять feeds PID 1 совпали побайтово, IPv6 route6 отличался только RA countdown. Comparator требует точного сопоставления стабильных полей и отдельно сообщает рост `expires`, совместимый с refresh. Снимки не устанавливают его причину. Live nft chain/rule, durable receipts/recovery и TEMPEST apply/rollback находились за границами trial 2.5. Основание приёмки — успешный VM trial, документация в `97bc1ca2892d014b26de04261f97be65fb708bbd`, [CI #40](https://github.com/GariestGary/tempest/actions/runs/44157909294) и [CodeQL #41](https://github.com/GariestGary/tempest/actions/runs/44157909311).
-- [ ] 2.6. Реализовать фактические операции NetworkPlan и транзакции validate/stage/diff/apply/confirm/rollback с восстановлением после ребута, ограниченным timeout и last-known-good; только после реестра ownership из 2.5 и необходимых Linux VM испытаний. `IN_PROGRESS`. Первый срез прошёл [VM-проверку одной пустой nftables table](TASK_2_6_FIRST_NFT_TABLE.md) на `febf6a46f36aadb8afe0bf7df135b6f33b853132`: create через IPC, read-back, durable receipt, restart и точечный rollback. Целевые тесты продолжения прошли для `verify → confirm`, сохранения дедлайна при рестарте, автоматического rollback и fail-closed при неполном receipt, смене namespace или появлении чужого child. На `72891f9` подтверждены автоматический откат до следующего IPC и сохранение чужой цепочки при автоматическом и явном rollback. [Live evidence](TASK_2_6_FIRST_NFT_TABLE.md#confirmation-and-failure-recovery-evidence--2026-11-18). На `6c6f37d` прошёл [live confirmation continuity](TASK_2_6_FIRST_NFT_TABLE.md#live-confirmation-continuity--2026-11-18). После штатного рестарта и исходного дедлайна receipt остался `confirmed`, явный rollback восстановил baseline. Владелец принял этот лабораторный срез 2026-11-18. Реальное исполнение v1 и reboot recovery открыты.
-- [ ] 2.7. Прогнать Linux VM fault injection: ошибка nft, пропавший tun, невалидный config, разрыв agent IPC, reboot до confirm, недоступность SSH через target route.
-- [ ] 2.8. Проверить least privilege фактически (`docker inspect`, `/proc/*/status`, capabilities, nft/ip snapshots). Оформить ADR-001 как принятое решение после испытаний.
+- [ ] **2.6. Конфигурация и безопасное применение.** Один закреплённый Xray для WireGuard ingress и ручных DIRECT/VLESS/BLOCK. Сохранить семантический запрет неявного DIRECT, чистую генерацию PiTun и границу Agent mode. Проверять вне активного файла, сериализовать поколения, сохранять intent, атомарно менять конфиг и проверять живой трафик. Подтверждённый LKG хранится отдельно от pending и проверяется после restart/reboot. При несовместимом с отзывом peer LKG, коллизии порта или провале readiness ingress остаётся закрыт. `IN_PROGRESS`. [Lifecycle и проверенные сценарии](XRAY_MVP_LIFECYCLE.md)
+- [ ] **2.7. Отказные испытания.** На disposable VM проверить invalid policy/config, конфликт UDP, потерю IPC или lifecycle-процесса, разрыв после записи файла до confirm, timeout, reboot с pending, отказ egress и невозможность запуска LKG. Сверить TCP/UDP/DNS IPv4/IPv6, положительную достижимость прямого пути, отсутствие обхода, сохранность SSH/консоли и поведение клиента при снятии WG-маршрутов.
+- [ ] **2.8. Изоляция поставляемых сервисов.** Проверить разные UID, все capability masks, `NoNewPrivs`, границы socket/FS/namespace, отсутствие TUN и Docker socket, сверку сети PID 1 до/во время/после. Проверить используемую модель публикации UDP. Представить ADR-001 на отдельное принятие.
 
-**Граница 2.6 и 2.7 (2026-11-18).** Для одной пустой nftables table проверены валидирующий stage с diff, запись intent и проверка apply по ядру, verify/confirm/LKG, дедлайн, штатный рестарт Agent в том же boot и namespace и нерекурсивный rollback с проверкой ownership. Полная 2.6 требует реального backend для согласованного набора операций NetworkPlan и восстановления LKG при reboot. Если boot или namespace сменился, текущая реализация хранит старый журнал и закрывает мутации. Дедлайн прошлого boot и receipt не используются для присвоения, восстановления или удаления объектов. Для recovery нужен согласованный порядок сверки исторического журнала, нового namespace и LKG с fail-closed при неоднозначности. Реальные эксперименты 2.7 проверяют поведение этой функциональности при отказах. Они не заменяют реализацию гарантии 2.6. Разрывы до durable receipt и вставка child после последней проверки покрыты тестами с подменой ядра.
+**Принятый table-only срез 2.6.** Сохраняются код, тесты и результаты [эксперимента с пустой nftables table](TASK_2_6_FIRST_NFT_TABLE.md), в том числе Verify/Confirm, дедлайн, рестарт в том же boot и точечный rollback по ownership receipt. Универсальное управление kernel WireGuard, TUN/TPROXY, nftables и IP routes, расширение NetworkObjectRegistry и план block + dummy вынесены за критический путь MVP.
 
-**Gate 2 `OPEN`.** Для закрытия на VM нужно подтвердить, что API не имеет прав управлять хостом, Agent способен менять только TEMPEST-owned ресурсы, старое состояние восстанавливается автоматически и контрольный канал сохраняет доступность. **Не переходить дальше, пока эта часть не подтверждена.**
+**Gate 2 `OPEN`.** На disposable VM требуется подтвердить WG handshake, явные DIRECT/VLESS/BLOCK для TCP/UDP и dual-stack DNS, безопасное применение и recovery после restart/reboot. Защищённые потоки закрыты при отказе VPN и gateway с наблюдением пакетов и положительными прямыми контролями. Поставляемый Control Plane и Xray непривилегированы, состояние сети PID 1 и независимый контрольный канал сохраняются. Владелец проверяет доказательства и принимает Gate 2 отдельно.
 
-**Уточнение границ 2.3 и 2.5–2.6 (2026-11-12).** Предыдущая формулировка 2.3 связывала завершение Control Plane migration с фактическим переносом и применением сетевых мутаций в Agent, хотя обязательные ownership registry, реальные операции, транзакции и rollback запланированы на 2.5–2.6. Это создавало зависимость задач в неверном порядке и подталкивало к фиктивному успешному apply или к ранней реализации привилегированного кода. Scope продукта не меняется: 2.3 завершает только подготовительную границу — инвентаризацию, запрет legacy обходов, typed dispatch уже поддержанных inspection операций, DB-derived NetworkPlan и fail-closed отказ неподдерживаемых операций. Реальный сетевой apply и ownership остаются исключительно в 2.5–2.6. Xray/engine lifecycle — отдельная граница Control Plane↔engine и не является произвольной host-командой или операцией NetworkPlan v1; до отдельной реализации прямые вызовы engine в Agent mode отказывают. Legacy router/Wi-Fi/DHCP, Docker sidecars, SSH deploy и общий системный DNS остаются вне NetworkPlan v1 и закрыты в Agent mode.
+**Уточнение границ 2.3 и 2.5–2.6 (2026-11-12).** Предыдущая формулировка 2.3 связывала завершение Control Plane migration с фактическим переносом и применением сетевых мутаций в Agent, хотя обязательные ownership registry, реальные операции, транзакции и rollback запланированы на 2.5–2.6. Это создавало зависимость задач в неверном порядке и подталкивало к фиктивному успешному apply или к ранней реализации привилегированного кода. Scope продукта не меняется: 2.3 завершает только подготовительную границу — инвентаризацию, запрет legacy обходов, typed dispatch уже поддержанных inspection операций, DB-derived NetworkPlan и fail-closed отказ неподдерживаемых операций. Сетевые mutations table-only остаются в принятом изолированном срезе 2.6. Xray/engine lifecycle — отдельная граница Control Plane↔engine и не является произвольной host-командой или операцией NetworkPlan v1; до отдельной реализации прямые вызовы engine в Agent mode отказывают. Legacy router/Wi-Fi/DHCP, Docker sidecars, SSH deploy и общий системный DNS остаются вне NetworkPlan v1 и закрыты в Agent mode.
 
 ### ЭТАП 3 — Динамический Provider Manager и адаптеры
 
@@ -604,7 +602,7 @@ class IngressAdapter(Protocol):
 - [ ] 5.1. Нормализованная модель Rule/Matchers/Actions, порядок и объяснение коллизий; использовать PiTun routing logic по максимуму.
 - [ ] 5.2. Матчи по domain/subdomain/wildcard, CIDR, порт/proto, source device/group/ingress; явные приоритеты и fallback semantics.
 - [ ] 5.3. Контролируемая DNS-схема для TEMPEST клиентов, включая CNAME/TTL, IPv4/IPv6, DNS leak handling; поведение DoH клиентов документировать.
-- [ ] 5.4. Реализация policy в Xray/engine + agent nftables/ip rules без захвата system routing. Исключить петли/трафик самого агента.
+- [ ] 5.4. Реализация policy userspace Xray для WG ingress. Исключить петли и обходы политики. Прозрачный LAN capture относится к отдельному профилю.
 - [ ] 5.5. Ручные правила типа `example.com -> NL`, `*.example.org -> PL`, `bank.example -> DIRECT`, `client A -> VPN group`.
 - [ ] 5.6. Kill-switch/fail-closed при недоступности выбранного egress; direct fallback **только** с явным разрешением.
 - [ ] 5.7. Route Explainer, dry-run, test matrix включая конфликтующие/перекрывающиеся rules и IPv6.
@@ -729,6 +727,7 @@ git rev-parse HEAD
 
 | Дата | Этап | Изменения/результаты | Тесты | Commit | Блокеры | Кто принял |
 |---|---|---|---|---|---|---|
+| 2026-11-18 | 2.6, Xray lifecycle | Владелец утвердил Xray 26.10.31 и редакцию этапа 2 по A/B. Первый живой профиль применён через AF_UNIX CLI, реальный Agent и systemd. Отозванный peer исключён из rollback и startup recovery. [Lifecycle и доказательства](XRAY_MVP_LIFECYCLE.md) | 94 targeted pytest. Disposable VM PASS для stage/diff, apply/verify/confirm с 14/14 traffic probes, проверки прав, восстановления после рестарта, коллизии с защищённым закрытием, rollback/revoke и cleanup. | Коммит этой записи, база `b35c5de846d2f93d2e51785753e57b0464eed89c`. | Фактический reboot, проверка boot provisioning и поставляемых сервисных границ открыты. 2.6 `IN_PROGRESS`, Gate 2 `OPEN`, ADR-001 `PROPOSED`. | Владелец принял A/B и пересмотр архитектуры, реализация к ревью |
 | 2026-11-18 | 2.6, userspace A/B | Согласованный disposable VM POC подтвердил WG → DIRECT/VLESS/BLOCK на Xray 26.10.31 и sing-box 1.14.2. Xray рекомендован для MVP, block + dummy приостановлен владельцем. [Матрица A/B и проект редакции 2.6–2.8 и Gate 2](ENGINE_VS_KERNEL_DECISION.md) переданы на ревью. | WireGuard handshake, dual-stack TCP/UDP/DNS, смена правила, живые права, отрицательные пробы с положительным прямым контролем, rollback, отзыв и cleanup. Xray LKG PASS. sing-box LKG FAIL в согласованной топологии. Независимая консоль и целостность QCOW2 проверены. | База TEMPEST `d01f9079c4f3012e1eb4100504ef491303ab3900`, гостевой checkout `b3bb6399ff33524569c62feb234d8a80a3483667`. | Lifecycle TEMPEST, reboot recovery, поставляемые Compose/systemd и восстановление из QCOW2 остаются открыты. Task 2.6 `IN_PROGRESS`, Gate 2 `OPEN`. | — |
 | 2026-11-18 | 2.6, приёмка первого среза и проверка v1 | Первый лабораторный срез `ACCEPTED` в проверенных границах. Dummy-only план отклоняется без default block. План с dummy и block валиден, для block отсутствует фактическое исполнение. Зафиксированы минимальный путь и проект cross-boot LKG. | По 181 целевому тесту на TYPHOON и VM. Проверена ошибка валидатора и отказ парсера lab backend принять v1. Новый live trial `NOT_RUN`. | База `3d4d79aa838cae056c8a03604b1303924548865d` | Согласовать проверяемый default block для первого реального v1 среза. Реальный backend и reboot recovery открыты. Task 2.6 `IN_PROGRESS`, Gate 2 `OPEN`. | Владелец, только лабораторный срез |
 | 2026-11-18 | 2.6, live confirmation continuity | Поколение осталось `confirmed` побайтово после штатного рестарта и исходного 15-секундного дедлайна. Свежий IPC read_status повторно подтвердил ownership. Явный rollback записал `rolled_back`, таблица отсутствует. Target 6/6 feeds вернулись к baseline, PID 1 совпал по 5/6 feeds, в route6 только IPv6 RA countdown 65317→65300. | По 218 targeted pytest на TYPHOON и VM. CI и CodeQL на проверенном SHA прошли. Git-архив и приватные доказательства сверены по SHA-256. Повторно проверены QCOW2 и независимая консоль. | VM `6c6f37d194db8ec6a5e3841ce4789513fd46276a` | Срез пустой таблицы готов к ревью. Для полной 2.6 открыты более широкий NetworkPlan и восстановление LKG после reboot. 2.7 отдельно, Gate 2 `OPEN`. | — |
@@ -763,7 +762,7 @@ git rev-parse HEAD
 
 ### Открытые архитектурные вопросы (не заполнять догадками)
 
-- [ ] Этап 2: проверить основной кандидат — Agent в отдельном network namespace; рассматривать ограниченный host-netns systemd Agent только если A/B Linux VM experiment подтвердит конкретную host-only необходимость. ADR-001 остаётся PROPOSED до испытаний и review.
+- [ ] Этап 2: проверить поставляемый профиль userspace Xray, lifecycle и изоляцию на Linux VM. ADR-001 остаётся PROPOSED до испытаний и review.
 - [ ] Уточнить на этапе 2: какие конкретно операции PiTun применяет к **host namespace**, что из этого нужно нашему gateway.
 - [ ] Уточнить на этапе 3/4: стратегию выбора Xray vs sing-box для VLESS/HY2; какие версии поддерживаются и какие требуют отдельного бинарника.
 - [ ] Уточнить на этапе 4: AWG поддерживаемые версии/режимы и Linux runtime на целевом железе.

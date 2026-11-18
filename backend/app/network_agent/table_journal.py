@@ -55,8 +55,8 @@ class TableRecord(ContractModel):
         return self
 
 
-class TableJournal:
-    """Hold an exclusive directory lock and replace the record durably."""
+class PrivateJournal:
+    """An exclusive, Agent-owned directory for bounded durable records."""
 
     def __init__(self, directory: Path) -> None:
         import fcntl
@@ -69,7 +69,7 @@ class TableJournal:
             os.close(self._directory)
             raise
 
-    def __enter__(self) -> "TableJournal":
+    def __enter__(self):
         return self
 
     def __exit__(self, *_exc: object) -> None:
@@ -83,28 +83,25 @@ class TableJournal:
         if mode == 0o600 and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1):
             raise ValueError("journal record is not a private regular file")
 
-    def read(self) -> TableRecord | None:
+    def read_bytes(self, name: str, limit: int) -> bytes | None:
         try:
             fd = os.open(
-                "table.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                 dir_fd=self._directory,
             )
         except FileNotFoundError:
             return None
         with os.fdopen(fd, "rb") as stream:
             self._require_private(stream.fileno(), 0o600)
-            data = stream.read(_MAX_RECORD + 1)
-            if len(data) > _MAX_RECORD:
+            data = stream.read(limit + 1)
+            if len(data) > limit:
                 raise ValueError("journal record exceeds size limit")
-            return TableRecord.model_validate_json(data)
+            return data
 
-    def write(self, record: TableRecord) -> None:
-        # Pydantic also serializes the registry's namespace identity.
-        data = record.model_dump_json().encode()
-        TableRecord.model_validate_json(data)
-        if len(data) > _MAX_RECORD:
+    def write_bytes(self, name: str, data: bytes, limit: int) -> None:
+        if len(data) > limit:
             raise ValueError("journal record exceeds size limit")
-        temporary = f".table-{uuid4().hex}"
+        temporary = f".{name.split('.')[0]}-{uuid4().hex}"
         fd = os.open(
             temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
             0o600, dir_fd=self._directory,
@@ -115,12 +112,23 @@ class TableJournal:
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, "table.json", src_dir_fd=self._directory, dst_dir_fd=self._directory)
+            os.replace(temporary, name, src_dir_fd=self._directory, dst_dir_fd=self._directory)
             os.fsync(self._directory)
         finally:
             try:
                 os.unlink(temporary, dir_fd=self._directory)
             except FileNotFoundError:
                 pass
-        if self.read() != record:
+        if self.read_bytes(name, limit) != data:
             raise ValueError("journal read-back differs from the committed record")
+
+
+class TableJournal(PrivateJournal):
+    def read(self) -> TableRecord | None:
+        data = self.read_bytes("table.json", _MAX_RECORD)
+        return None if data is None else TableRecord.model_validate_json(data)
+
+    def write(self, record: TableRecord) -> None:
+        data = record.model_dump_json().encode()
+        TableRecord.model_validate_json(data)
+        self.write_bytes("table.json", data, _MAX_RECORD)

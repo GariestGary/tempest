@@ -1,0 +1,12 @@
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "tempest-xray-agent" ||
+        action.id !== "org.freedesktop.systemd1.manage-units") {
+        return;
+    }
+    var unit = action.lookup("unit");
+    var verb = action.lookup("verb");
+    if ((unit === "tempest-xray.service" && (verb === "start" || verb === "stop")) ||
+        (unit === "tempest-xray-probe.service" && verb === "start")) {
+        return polkit.Result.YES;
+    }
+});

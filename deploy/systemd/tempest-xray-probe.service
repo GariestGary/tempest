@@ -1,0 +1,24 @@
+[Unit]
+Description=TEMPEST Xray WireGuard traffic verification
+After=tempest-xray.service
+AssertPathIsMountPoint=/run/netns/tempest-ns-xray-probe
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+User=tempest-xray-probe
+NetworkNamespacePath=/run/netns/tempest-ns-xray-probe
+ExecStart=/opt/tempest/bin/xray-mvp-probe
+TimeoutStartSec=5s
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

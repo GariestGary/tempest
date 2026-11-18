@@ -2,6 +2,8 @@
 
 **Статус.** Задачи 2.1–2.5 приняты владельцем. У лабораторного протокола v2 принят [срез одной пустой nftables table](TASK_2_6_FIRST_NFT_TABLE.md). Для NetworkPlan v1 работают модель, типизированный AF_UNIX и in-memory mock. Control Plane в Agent mode вызывает validate/diff/status и отвергает apply. Реального исполнения v1 пока нет. Task 2.6 `IN_PROGRESS`, Gate 2 `OPEN`, ADR-001 `PROPOSED`.
 
+> **Граница MVP (2026-11-18).** Владелец утвердил userspace Xray 26.10.31 по A/B. Этот документ сохраняет контракт NetworkPlan v1 и принятый table-only срез. Универсальное ядро и эксперименты host-netns вынесены за критический путь. Текущий 2.6 использует [Xray configuration lifecycle](XRAY_MVP_LIFECYCLE.md).
+
 ## Граница полномочий
 
 ```mermaid

@@ -14,6 +14,7 @@ from app.config import settings
 from app.network_agent.models import (
     MAX_IPC_MESSAGE_BYTES,
     AgentStatus,
+    ContractModel,
     DiffRequest,
     IPCResponse,
     NetworkDiff,
@@ -47,12 +48,12 @@ class NetworkAgentClient:
         self._socket_path = socket_path or settings.network_agent_socket
         self._timeout = timeout
 
-    async def _call(self, request: ValidateRequest | DiffRequest | ReadStatusRequest) -> IPCResponse:
+    async def _call(self, request: ContractModel) -> IPCResponse:
         if not hasattr(asyncio, "open_unix_connection"):
             raise NetworkAgentUnavailable("Network Agent AF_UNIX IPC is unsupported on this platform")
         payload = request.model_dump_json().encode("utf-8")
         if len(payload) > MAX_IPC_MESSAGE_BYTES:
-            raise NetworkAgentUnavailable("NetworkPlan exceeds the IPC frame limit")
+            raise NetworkAgentUnavailable("Agent request exceeds the IPC frame limit")
 
         async def exchange() -> IPCResponse:
             reader, writer = await asyncio.open_unix_connection(self._socket_path)

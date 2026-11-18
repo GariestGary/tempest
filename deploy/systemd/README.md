@@ -33,3 +33,7 @@ does not create namespaces, call `setns`, inspect host networking, or need
 effective capabilities and namespace inode on an isolated Linux VM before any
 future capability or network operation is considered. Never install this unit
 on TORNADO or VORTEX as part of task 2.2.
+
+## Xray MVP (opt-in)
+
+Настройка отдельного AF_UNIX сокета, systemd unit, ограниченного polkit и traffic verifier описана в [Xray lifecycle](../../docs/XRAY_MVP_LIFECYCLE.md).

@@ -1,0 +1,37 @@
+[Unit]
+Description=TEMPEST Xray configuration Agent
+After=local-fs.target dbus.service systemd-tmpfiles-setup.service
+AssertPathIsMountPoint=/run/netns/tempest-ns-xray
+
+[Service]
+Type=simple
+User=tempest-xray-agent
+Group=tempest-control
+SupplementaryGroups=tempest-xray
+NetworkNamespacePath=/run/netns/tempest-ns-xray
+Environment=PYTHONPATH=/opt/tempest/backend
+EnvironmentFile=/etc/tempest/xray-agent.env
+ExecStart=/opt/tempest/backend/.venv/bin/python -m app.network_agent --socket=/run/tempest-xray-agent/control.sock --allowed-uids=${TEMPEST_AGENT_ALLOWED_UIDS} --allowed-gids=${TEMPEST_AGENT_ALLOWED_GIDS} --xray=/opt/tempest/bin/xray --xray-state=/var/lib/tempest-xray-agent --xray-runtime=/run/tempest-xray --xray-netns=tempest-ns-xray --xray-listen=${TEMPEST_XRAY_LISTEN} --xray-port=${TEMPEST_XRAY_PORT}
+RuntimeDirectory=tempest-xray-agent
+RuntimeDirectoryMode=0750
+StateDirectory=tempest-xray-agent
+StateDirectoryMode=0700
+ReadWritePaths=/run/tempest-xray
+UMask=0077
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
