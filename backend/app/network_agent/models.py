@@ -315,6 +315,7 @@ class AgentStatus(ContractModel):
     confirmation_deadline_epoch_ms: int | None = Field(default=None, ge=0)
     owned_object_ids: tuple[str, ...] = ()
     last_error: str | None = None
+    generation_watermark: int | None = Field(default=None, ge=0)
 
 
 class ValidationResult(ContractModel):

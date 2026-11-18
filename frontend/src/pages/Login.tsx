@@ -69,9 +69,9 @@ export function Login() {
           {loading ? t('Signing in\u2026', '\u0412\u0445\u043e\u0434\u2026') : t('Sign In', '\u0412\u043e\u0439\u0442\u0438')}
         </button>
 
-        <p className="text-center text-xs text-gray-600">
+        {import.meta.env.VITE_WORKING_CORE !== '1' && <p className="text-center text-xs text-gray-600">
           {t('Default: admin / password', '\u041f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e: admin / password')}
-        </p>
+        </p>}
       </form>
     </div>
   )

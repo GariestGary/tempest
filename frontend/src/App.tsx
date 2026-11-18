@@ -20,6 +20,7 @@ import { Servers } from '@/pages/Servers'
 import { ServerTasks } from '@/pages/ServerTasks'
 import XuiPage from '@/pages/Xui'
 import ChainsPage from '@/pages/Chains'
+import { WorkingCore } from '@/pages/WorkingCore'
 
 function isTokenValid(token: string): boolean {
   try {
@@ -40,6 +41,15 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  if (import.meta.env.VITE_WORKING_CORE === '1') {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<AuthGuard><WorkingCore /></AuthGuard>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    )
+  }
   return (
     <Routes>
       <Route path="/login" element={<Login />} />

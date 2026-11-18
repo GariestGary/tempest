@@ -76,6 +76,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Validate Working Core Compose config
+        env:
+          TEMPEST_AGENT_GID: "10001"
+          TEMPEST_CORE_PRIVATE_DIR: /tmp/tempest-core-fixture
+        run: docker compose -f docker-compose.working-core.yml config --quiet
       - name: Render and audit the safe dev profile
         run: |
           docker compose -f docker-compose.dev.safe.yml config --format json > "$RUNNER_TEMP/tempest-dev-compose.json"

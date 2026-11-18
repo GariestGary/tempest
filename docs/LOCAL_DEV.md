@@ -4,9 +4,9 @@ Use the local project environments for fast feedback. GitHub Actions remains an 
 
 ## Feedback sequence
 
-1. Develop on TORNADO and run targeted Windows pytest for each changed behavior.
-2. At a reviewed commit, run selected safe Linux pytest on VORTEX via SSH with `scripts/remote-check.ps1`.
-3. After an authorized push, use GitHub CI as the independent complete check.
+1. Develop on TORNADO or TYPHOON and run targeted checks on the current OS for each changed behavior.
+2. When relevant and available, run allowlisted safe Linux pytest at an explicit reviewed commit on VORTEX via SSH with `scripts/remote-check.ps1`.
+3. At an agreed functional checkpoint after an authorized push, use GitHub CI and CodeQL as the independent complete check.
 4. Use a disposable isolated Linux VM only for real nftables, TUN, WireGuard, namespace, and rollback experiments. VORTEX is never a privileged network integration host.
 
 ## VORTEX remote Linux runner

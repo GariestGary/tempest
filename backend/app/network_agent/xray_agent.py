@@ -9,10 +9,11 @@ from pydantic import Field, model_validator
 
 from .models import AgentStatus, ContractModel, IPCError, IPCResponse, NetworkDiff, ValidationResult
 from .table_journal import PrivateJournal
-from .xray_profile import WireGuardKey, XrayPlan, XrayPlanRequest, XrayRequest
+from .xray_profile import WireGuardKey, XrayPlan, XrayPlanRequest, XrayRequest, XrayRevokeRequest
 from .xray_runtime import SystemdXray, XrayRuntimeError
 
 _JOURNAL_LIMIT = 256 * 1024
+_MAX_REVOKED = 2048
 
 
 class ProfileConflict(ValueError):
@@ -34,7 +35,7 @@ class Snapshot(ContractModel):
         return data
 
     def keys(self) -> set[str]:
-        return {peer.public_key for peer in self.plan.peers}
+        return {peer.public_key for peer in self.plan.runtime_peers()}
 
 
 class XrayRecord(ContractModel):
@@ -43,7 +44,7 @@ class XrayRecord(ContractModel):
     last_attempt_id: UUID | None = None
     lkg: Snapshot | None = None
     pending: Snapshot | None = None
-    revoked: frozenset[WireGuardKey] = Field(default_factory=frozenset, max_length=2048)
+    revoked: frozenset[WireGuardKey] = Field(default_factory=frozenset, max_length=_MAX_REVOKED)
 
     @model_validator(mode="after")
     def check_generations(self) -> "XrayRecord":
@@ -144,7 +145,7 @@ class XrayAgent:
 
     @staticmethod
     def _runtime_payload(snapshot: Snapshot) -> bytes | None:
-        return snapshot.payload() if snapshot.plan.peers else None
+        return snapshot.payload() if snapshot.plan.runtime_peers() else None
 
     def _activate(self, snapshot: Snapshot) -> None:
         payload = self._runtime_payload(snapshot)
@@ -180,6 +181,7 @@ class XrayAgent:
             pending_generation_id=pending.plan.generation_id if pending else None,
             confirmation_deadline_epoch_ms=self._deadline_epoch_ms if pending and active else None,
             last_error=self._last_error,
+            generation_watermark=self._record.high_water,
         )
 
     def _candidate(self, plan: XrayPlan) -> Snapshot:
@@ -198,7 +200,7 @@ class XrayAgent:
         plan = candidate.plan
         old = self._active.plan if self._active else None
         fields = {
-            "wireguard": ("tunnel_addresses", "private_key", "peers"),
+            "wireguard": ("tunnel_addresses", "private_key", "peers", "probe"),
             "vless": ("vless",),
             "dns": ("resolvers",),
             "destination-policy": ("rules",),
@@ -272,6 +274,42 @@ class XrayAgent:
         self._verified = method == "verify"
         return self._status()
 
+    def _revoke_peer(self, request: XrayRevokeRequest) -> AgentStatus:
+        """Revoke against LKG independently of any unconfirmed policy edits."""
+        if self._record.pending is not None:
+            raise ProfileConflict("finish or roll back the pending configuration first")
+        if request.public_key in self._record.revoked:
+            return self._status()
+        lkg = self._record.lkg
+        revoked = self._record.revoked | {request.public_key}
+        if len(revoked) > _MAX_REVOKED:
+            raise ProfileConflict("the revocation journal is full")
+        if lkg is None or request.public_key not in lkg.keys():
+            self._write(self._record.model_copy(update={"revoked": revoked}))
+            return self._status()
+        if lkg.plan.probe and lkg.plan.probe.peer.public_key == request.public_key:
+            raise ProfileConflict("the provisioned probe peer cannot be revoked from the panel")
+
+        generation = self._record.high_water + 1
+        candidate = Snapshot.create(lkg.plan.model_copy(update={
+            "peers": tuple(peer for peer in lkg.plan.peers if peer.public_key not in revoked),
+            "generation": generation,
+            "generation_id": request.request_id,
+            "base_generation": lkg.plan.generation,
+        }))
+        self._stop()
+        self._write(self._record.model_copy(update={
+            "revoked": revoked, "high_water": generation, "last_attempt_id": request.request_id,
+        }))
+        try:
+            self._runtime.validate(candidate.payload())
+            self._activate(candidate)
+        except (OSError, ValueError, XrayRuntimeError):
+            self._close("peer revoked; remaining ingress could not be restored")
+        else:
+            self._write(self._record.model_copy(update={"lkg": candidate}))
+        return self._status()
+
     def maintain(self) -> None:
         if self._fatal:
             raise RuntimeError("Xray Agent could not stop ingress; stopping the bound service")
@@ -313,6 +351,14 @@ class XrayAgent:
                     generation_id=candidate.plan.generation_id, fingerprint=candidate.fingerprint,
                     operation_count=len(candidate.plan.rules), permitted_egress_count=2,
                 )
+            elif isinstance(request, XrayRevokeRequest):
+                result = self._revoke_peer(request)
+            elif request.method == "recover_lkg":
+                if self._record.pending is not None or self._safe_lkg() is None:
+                    raise ProfileConflict("recover requires a safe confirmed generation and no pending apply")
+                self._stop()
+                self._restore()
+                result = self._status()
             elif request.method == "apply":
                 result = self._apply(request.generation_id)
             else:

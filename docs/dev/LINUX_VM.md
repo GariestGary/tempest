@@ -1,6 +1,10 @@
 # Изолированный Linux integration стенд
 
-## Статус
+## Действующий стенд
+
+Working Core использует согласованную disposable Linux VM по [инструкции](../WORKING_CORE.md). Ниже сохранены рекомендации и прежняя история dev-safe.
+
+## Исторический статус TORNADO
 
 Локальная VM на TORNADO не создана: это меняло бы конфигурацию хоста, а WSL инвентаризация завершилась `E_ACCESSDENIED`. Для Gate 1 safe Compose runtime smoke назначен изолированный GitHub-hosted `ubuntu-latest`; он не использует TORNADO или VORTEX. Реальные nftables/WireGuard integration rules остаются за рамками этапа 1.
 
@@ -12,7 +16,7 @@
 - Не пробрасывать Docker socket, host PID, каталоги `/etc`, credentials, SSH keys и production backup. Не использовать shared folders с правом записи в host workspace.
 - Для начального safe-mode smoke можно клонировать репозиторий внутри гостя и открыть только loopback UI/API. Внешний NAT-интернет включать только при конкретной необходимости скачивания зависимостей, затем отключать.
 - Перед экспериментами сохранять guest `ip -brief address`, `ip route`, `nft list ruleset`, `/etc/resolv.conf`; после сравнивать снимки. Это команды будущей ручной проверки внутри гостя, запускать их не в этой фазе.
-- Реальные TUN/WG/nftables сценарии допускаются лишь после отдельного согласования соответствующей фазы и проверки поддержки ядра. Сетевые права не выдаются Control Plane.
+- Реальные TUN/WG/nftables сценарии допускаются лишь после отдельного согласования конкретного сетевого эксперимента и проверки поддержки ядра. Сетевые права не выдаются Control Plane.
 
 ## Phase 1 Compose smoke
 
@@ -51,6 +55,6 @@ GitHub Actions job ещё должен пройти после push; до усп
 - WSL2 можно использовать для Python/Node unit-тестов, но не считать его подтверждённым стендом для kernel WG, TUN или `CAP_NET_ADMIN`. Сначала проверяются доступность ядра, `/dev/net/tun` и network namespace в отдельной VM.
 - Не включать mirrored networking, port forwarding или bridged NIC ради этого этапа. Перечень WSL дистрибутивов на TORNADO не удалось получить из-за Windows `E_ACCESSDENIED`; никакие настройки WSL не менялись.
 
-## Использование по этапам
+## Границы испытаний
 
-Этап 1 использует только no-op dataplane и не требует VM privileges. VM предназначена для последующих тестов агента/namespace, fault injection и проверки rollback после реализации и отдельного одобрения. Не выполнять `ip route`, `nft`, `sysctl`, `wg-quick`, `systemctl` или аналогичные команды изменения состояния до такого этапа.
+Dev-safe использует no-op dataplane. Для Working Core соблюдайте согласованный scope VM, namespace, selectors, snapshot и независимую консоль, как предусмотрено в [AGENTS.md](../../AGENTS.md).

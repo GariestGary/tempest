@@ -14,6 +14,7 @@ EnvironmentFile=/etc/tempest/xray-agent.env
 ExecStart=/opt/tempest/backend/.venv/bin/python -m app.network_agent --socket=/run/tempest-xray-agent/control.sock --allowed-uids=${TEMPEST_AGENT_ALLOWED_UIDS} --allowed-gids=${TEMPEST_AGENT_ALLOWED_GIDS} --xray=/opt/tempest/bin/xray --xray-state=/var/lib/tempest-xray-agent --xray-runtime=/run/tempest-xray --xray-netns=tempest-ns-xray --xray-listen=${TEMPEST_XRAY_LISTEN} --xray-port=${TEMPEST_XRAY_PORT}
 RuntimeDirectory=tempest-xray-agent
 RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
 StateDirectory=tempest-xray-agent
 StateDirectoryMode=0700
 ReadWritePaths=/run/tempest-xray

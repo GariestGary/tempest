@@ -1,0 +1,68 @@
+name: tempest-working-core
+
+services:
+  api:
+    build:
+      context: ./backend
+      target: agent
+    command: ["uvicorn", "app.working_core:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    user: "10001:${TEMPEST_AGENT_GID:?Set the authorized numeric Agent group ID}"
+    environment:
+      CONTROL_PLANE_MODE: agent
+      DEV_SAFE_MODE: "0"
+      DATABASE_URL: sqlite:////app/data/working-core.db
+      TEMPEST_CORE_DEPLOYMENT_FILE: /run/core/deployment.json
+      TEMPEST_CORE_SECRET_FILE: /run/core/app-secret
+      TEMPEST_CORE_BOOTSTRAP_PASSWORD_FILE: /run/core/bootstrap-password
+      HOME: /tmp
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    volumes:
+      - core_db:/app/data
+      - type: bind
+        source: /run/tempest-xray-agent
+        target: /run/tempest-xray-agent
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${TEMPEST_CORE_PRIVATE_DIR:?Set the private Working Core provisioning directory}"
+        target: /run/core
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 4s
+      retries: 6
+      start_period: 15s
+
+  panel:
+    build:
+      context: ./frontend
+      args:
+        VITE_WORKING_CORE: "1"
+    user: "101:101"
+    entrypoint: ["nginx", "-c", "/etc/nginx/working-core.conf", "-g", "daemon off;"]
+    command: []
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    volumes:
+      - ./frontend/nginx-working-core.conf:/etc/nginx/working-core.conf:ro
+    ports:
+      - "127.0.0.1:${TEMPEST_PANEL_PORT:-8787}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  core_db:

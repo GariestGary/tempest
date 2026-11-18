@@ -11,18 +11,25 @@ from .client import NetworkAgentClient, NetworkAgentRejected, NetworkAgentUnavai
 from .models import (
     MAX_IPC_MESSAGE_BYTES, ApplyRequest, ConfirmRequest, ReadStatusRequest, RollbackRequest, VerifyRequest,
 )
-from .xray_profile import XrayPlan, XrayPlanRequest
+from .xray_profile import XrayPlan, XrayPlanRequest, XrayRecoverRequest, XrayRevokeRequest
 
 DEFAULT_SOCKET = "/run/tempest-xray-agent/control.sock"
 
 
 class XrayAgentClient(NetworkAgentClient):
+    async def revoke_peer(self, public_key: str):
+        return await self._call(XrayRevokeRequest(
+            protocol_version=1, request_id=uuid4(), method="revoke_peer", public_key=public_key,
+        ))
+
     async def request(self, method: str, *, plan: XrayPlan | None = None, generation_id: UUID | None = None):
         fields = {"request_id": uuid4(), "method": method}
         if method in {"validate", "stage", "diff"}:
             request = XrayPlanRequest(protocol_version=1, plan=plan, **fields)
         elif method == "read_status":
             request = ReadStatusRequest(**fields)
+        elif method == "recover_lkg":
+            request = XrayRecoverRequest(protocol_version=1, **fields)
         else:
             request_type = {
                 "apply": ApplyRequest, "verify": VerifyRequest,

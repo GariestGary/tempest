@@ -2,15 +2,9 @@
 
 **🌐 Languages:** [English](README.md) · **Русский**
 
-> TEMPEST — self-hosted VPN-шлюз и оркестратор исходящих подключений
-> для Linux, форк [DaveBugg/PiTun](https://github.com/DaveBugg/PiTun).
-> Репозиторий находится на этапе 1: разрешён только безопасный dev-профиль
-> без сетевых операций; VPN-трафик и управление сетью хоста в нём отключены.
-
-> **Справка upstream:** разделы установки, router mode и функций ниже
-> сохранены из документации PiTun для сравнения. Они описывают upstream
-> и не являются инструкцией по развёртыванию TEMPEST. Используйте
-> [безопасный dev-профиль](docs/DEV_SAFE_MODE.md).
+> TEMPEST — самохостируемый VPN-шлюз с Web-панелью на базе [DaveBugg/PiTun](https://github.com/DaveBugg/PiTun). Текущий блок — [Working Core](docs/PROJECT_SPEC.md#15-действующий-roadmap) на Xray 26.10.31. См. [инструкцию тестового стенда](docs/WORKING_CORE.md) и [безопасный dev-профиль](docs/DEV_SAFE_MODE.md).
+>
+> Описания функций и установки ниже сохранены как справка по PiTun. Для форка используйте инструкции TEMPEST.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/DaveBugg/PiTun/ci.yml?branch=master&label=CI)](#)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)

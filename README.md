@@ -2,16 +2,9 @@
 
 **🌐 Languages:** **English** · [Русский](README.ru.md)
 
-> TEMPEST is a self-hosted VPN gateway and egress orchestrator for Linux,
-> forked from [DaveBugg/PiTun](https://github.com/DaveBugg/PiTun). This
-> repository is in phase 1: only the non-networking safe development
-> profile is authorized; VPN traffic and host network operations are not
-> available in that profile.
-
-> **Upstream reference:** feature, installation, and router-mode sections
-> below retain PiTun documentation for comparison. They describe upstream
-> behavior and are not TEMPEST deployment instructions. Use the safe
-> development profile in [`docs/DEV_SAFE_MODE.md`](docs/DEV_SAFE_MODE.md).
+> TEMPEST is a self-hosted VPN gateway with a Web panel, based on [DaveBugg/PiTun](https://github.com/DaveBugg/PiTun). The current milestone is [Working Core](docs/PROJECT_SPEC.md#15-действующий-roadmap) with Xray 26.10.31. See the [test-stand guide](docs/WORKING_CORE.md) and the [safe development profile](docs/DEV_SAFE_MODE.md).
+>
+> The PiTun features and installation instructions below are upstream reference material. Use the TEMPEST guides for this fork.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/DaveBugg/PiTun/ci.yml?branch=master&label=CI)](#)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)

@@ -2,7 +2,7 @@
 
 **Статус.** Задачи 2.1–2.5 приняты владельцем. У лабораторного протокола v2 принят [срез одной пустой nftables table](TASK_2_6_FIRST_NFT_TABLE.md). Для NetworkPlan v1 работают модель, типизированный AF_UNIX и in-memory mock. Control Plane в Agent mode вызывает validate/diff/status и отвергает apply. Реального исполнения v1 пока нет. Task 2.6 `IN_PROGRESS`, Gate 2 `OPEN`, ADR-001 `PROPOSED`.
 
-> **Граница MVP (2026-11-18).** Владелец утвердил userspace Xray 26.10.31 по A/B. Этот документ сохраняет контракт NetworkPlan v1 и принятый table-only срез. Универсальное ядро и эксперименты host-netns вынесены за критический путь. Текущий 2.6 использует [Xray configuration lifecycle](XRAY_MVP_LIFECYCLE.md).
+> **Граница MVP (2026-11-18).** Владелец утвердил userspace Xray 26.10.31 по A/B. Этот документ сохраняет контракт NetworkPlan v1 и принятый table-only срез. Универсальное ядро и эксперименты host-netns вынесены за критический путь. Действующий [Working Core](PROJECT_SPEC.md#15-действующий-roadmap) использует [Xray configuration lifecycle](XRAY_MVP_LIFECYCLE.md). Прежние gates, статусы и разрешения в этом документе исторические.
 
 ## Граница полномочий
 
@@ -130,4 +130,4 @@ A is the first candidate if its required operations and IPC work without host na
 - `deploy/systemd/tempest-network-agent.service` assumes pre-provisioned `tempest-agent` and `tempest-control` system identities and a root-managed `/etc/tempest/network-agent.env`. The unit has `NoNewPrivileges=yes`, empty capability bounding/ambient sets, `ProtectSystem=strict`, `ProtectHome=yes`, only `/run/tempest-agent` writable, explicit inaccessible host configuration/Docker paths, `PrivateDevices=yes`, and `RestrictAddressFamilies=AF_UNIX`. A drop-in may set `NetworkNamespacePath=` to an operator-prepared namespace; this implementation does not create or enter namespaces itself. The unit is a template and has not been installed on TORNADO or VORTEX.
 - Confirm now rechecks a canonical fingerprint of the active owned-object snapshot against the pending snapshot at commit time, and revokes prior Verify permission on mismatch. This detects in-memory drift even when nested snapshot data was mutated after Verify.
 - Remaining for v1: the request replay cache is process-memory only. Real v1 apply, ownership receipts, effective default-block enforcement and reboot recovery are open. The accepted table-only v2 results cover a disposable VM, the lab Agent's capability masks and one isolated namespace. They leave production UID/cgroup mapping, systemd enforcement, physical connectivity and the broader A/B experiment open.
-- ADR-001 remains `PROPOSED`. Full Task 2.6 and Gate 2 are open. Tasks 2.7–2.8 require separate authorization.
+- Historical status at the table trial: ADR-001 `PROPOSED`, Task 2.6 and Gate 2 open. Current authorization follows AGENTS.md and the Working Core roadmap.

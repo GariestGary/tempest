@@ -18,6 +18,8 @@ from .models import (
 
 INBOUND = "wg-mvp"
 DNS_PORTS = (53, 853)
+MAX_PEERS = 32
+MAX_RULES = 32
 MAPPED_IPV6 = IPv6Network("::ffff:0:0/96")
 Port = Annotated[int, Field(strict=True, ge=1, le=65535)]
 
@@ -79,6 +81,29 @@ class DestinationRule(ContractModel):
         return self
 
 
+class ProbePolicy(ContractModel):
+    peer: WireGuardPeer
+    rules: tuple[DestinationRule, ...] = Field(min_length=1, max_length=16)
+
+    @model_validator(mode="after")
+    def validate_targets(self) -> "ProbePolicy":
+        if {rule.egress for rule in self.rules} != {"direct", "vpn", "block"}:
+            raise ValueError("probe must exercise DIRECT, VLESS and BLOCK")
+        if any(rule.destination.prefixlen != rule.destination.max_prefixlen for rule in self.rules):
+            raise ValueError("probe destinations must be individual hosts")
+        _check_overlaps(self.rules)
+        return self
+
+
+def _check_overlaps(rules: tuple[DestinationRule, ...]) -> None:
+    for index, rule in enumerate(rules):
+        for previous in rules[:index]:
+            if (rule.port == previous.port
+                    and rule.destination.version == previous.destination.version
+                    and rule.destination.overlaps(previous.destination)):
+                raise ValueError("overlapping destination rules on the same port")
+
+
 class XrayPlan(GenerationPlan):
     """An allowlist of fields. Callers have no access to raw engine JSON."""
 
@@ -89,17 +114,19 @@ class XrayPlan(GenerationPlan):
     listen_port: Annotated[int, Field(strict=True, ge=1024, le=65535)]
     tunnel_addresses: tuple[IPvAnyInterface, IPvAnyInterface]
     private_key: WireGuardKey = Field(repr=False)
-    peers: tuple[WireGuardPeer, ...] = Field(max_length=32)
+    peers: tuple[WireGuardPeer, ...] = Field(max_length=MAX_PEERS)
     vless: VlessTLS
     resolvers: tuple[IPvAnyAddress, ...] = Field(min_length=1, max_length=2)
-    rules: tuple[DestinationRule, ...] = Field(max_length=32)
+    rules: tuple[DestinationRule, ...] = Field(max_length=MAX_RULES)
+    probe: ProbePolicy | None = None
     confirmation_timeout_seconds: int = Field(default=90, strict=True, ge=15, le=300)
 
     @model_validator(mode="after")
     def validate_policy(self) -> "XrayPlan":
         _check_host_addresses(self.tunnel_addresses)
-        keys = [peer.public_key for peer in self.peers]
-        addresses = [address.ip for peer in self.peers for address in peer.addresses]
+        peers = self.runtime_peers()
+        keys = [peer.public_key for peer in peers]
+        addresses = [address.ip for peer in peers for address in peer.addresses]
         if len(keys) != len(set(keys)) or len(addresses) != len(set(addresses)):
             raise ValueError("duplicate WireGuard peer key or address")
         if set(addresses).intersection(address.ip for address in self.tunnel_addresses):
@@ -112,13 +139,11 @@ class XrayPlan(GenerationPlan):
             raise ValueError("listener cannot be an egress destination")
         if len({address.version for address in self.resolvers}) != len(self.resolvers):
             raise ValueError("only one resolver per IP family is supported")
-        for index, rule in enumerate(self.rules):
-            for previous in self.rules[:index]:
-                if (rule.port == previous.port
-                        and rule.destination.version == previous.destination.version
-                        and rule.destination.overlaps(previous.destination)):
-                    raise ValueError("overlapping destination rules on the same port")
+        _check_overlaps(self.rules)
         return self
+
+    def runtime_peers(self) -> tuple[WireGuardPeer, ...]:
+        return self.peers + (self.probe.peer,) if self.probe else self.peers
 
     def config_bytes(self) -> bytes:
         import json
@@ -141,6 +166,16 @@ class XrayPlan(GenerationPlan):
         def match(egress: str, **conditions) -> dict:
             return dict(conditions, type="field", inboundTag=[INBOUND], outboundTag=egress)
 
+        def destination(rule: DestinationRule) -> dict:
+            return {"ip": [str(rule.destination)], "port": str(rule.port), "network": "tcp,udp"}
+
+        probe_rules = self.probe.rules if self.probe else ()
+        probe_routes = []
+        if self.probe:
+            source = [str(address) for address in self.probe.peer.addresses]
+            probe_routes = [match(rule.egress, sourceIP=source, **destination(rule)) for rule in probe_rules]
+            probe_routes.append(match("block", sourceIP=source))
+
         return (json.dumps({
             "log": {"loglevel": "warning"},
             "inbounds": [{
@@ -151,7 +186,7 @@ class XrayPlan(GenerationPlan):
                     "address": [str(address) for address in self.tunnel_addresses],
                     "peers": [{"publicKey": peer.public_key,
                                "allowedIPs": [str(address) for address in peer.addresses]}
-                              for peer in self.peers],
+                              for peer in self.runtime_peers()],
                 },
             }],
             "outbounds": [
@@ -159,15 +194,15 @@ class XrayPlan(GenerationPlan):
                 {"protocol": "freedom", "tag": "direct", "settings": {"finalRules": [
                     {"action": "allow", "network": "tcp,udp",
                      "ip": [str(rule.destination)], "port": str(rule.port)}
-                    for rule in self.rules if rule.egress == "direct"
+                    for rule in (*self.rules, *probe_rules) if rule.egress == "direct"
                 ]}},
                 vpn,
             ],
             "routing": {"domainStrategy": "AsIs", "rules": [
                 match("vpn", ip=[str(address) for address in self.resolvers], port="53", network="tcp,udp"),
                 match("block", port="53,853"),
-                *(match(rule.egress, ip=[str(rule.destination)], port=str(rule.port), network="tcp,udp")
-                  for rule in self.rules),
+                *probe_routes,
+                *(match(rule.egress, **destination(rule)) for rule in self.rules),
                 match("block"),
             ]},
         }, sort_keys=True, separators=(",", ":")) + "\n").encode()
@@ -180,8 +215,22 @@ class XrayPlanRequest(ContractModel):
     plan: XrayPlan
 
 
+class XrayRevokeRequest(ContractModel):
+    protocol_version: Literal[1]
+    request_id: UUID
+    method: Literal["revoke_peer"]
+    public_key: WireGuardKey
+
+
+class XrayRecoverRequest(ContractModel):
+    protocol_version: Literal[1]
+    request_id: UUID
+    method: Literal["recover_lkg"]
+
+
 XrayRequest = Annotated[
-    XrayPlanRequest | ApplyRequest | VerifyRequest | ConfirmRequest | RollbackRequest | ReadStatusRequest,
+    XrayPlanRequest | XrayRevokeRequest | ApplyRequest | VerifyRequest | ConfirmRequest | RollbackRequest
+    | ReadStatusRequest | XrayRecoverRequest,
     Field(discriminator="method"),
 ]
 _REQUEST = TypeAdapter(XrayRequest)

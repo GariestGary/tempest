@@ -1,6 +1,6 @@
 # ADR-001 — граница Control Plane и Network Agent
 
-Дата 2026-11-10. **Статус: PROPOSED.** Эскиз обновляется в рамках задачи 2.1; архитектурная приёмка зависит от Linux VM испытаний и Gate 2. Связано с D-006, §5 и §9 [спецификации](../PROJECT_SPEC.md). Подробный contract/mock и A/B эксперимент: [NetworkPlan / IPC](../NETWORK_PLAN_IPC.md).
+Дата 2026-11-10. **Статус: PROPOSED.** Направление Working Core утверждено владельцем. Проверка поставляемой границы зависит от испытаний Working Core на disposable Linux VM. Связано с D-006, §5 и §9 [спецификации](../PROJECT_SPEC.md). Подробный contract/mock и A/B эксперимент: [NetworkPlan / IPC](../NETWORK_PLAN_IPC.md).
 
 ## Контекст
 
@@ -23,7 +23,7 @@ Production PiTun соединяет HTTP, DB, Xray, host PID/network, Docker soc
 
 Явно решить, где создан kernel WG-интерфейс: его зашифрованный UDP socket остаётся в namespace создания даже после переноса интерфейса. Операторский preflight включает публикацию порта, пересечения подсетей, DNS, MTU, IPv6, доступный путь возврата и валидацию существующего firewall. Модель сосуществования проверяется на VM с аналогами Caddy/AdGuard/SSH. [WireGuard netns](https://www.wireguard.com/netns/), [systemd.exec](https://github.com/systemd/systemd/blob/main/man/systemd.exec.xml).
 
-Владелец утвердил вариант D и Xray 26.10.31 для WG/VLESS MVP по результатам A/B на `b35c5de`. Текущий этап 2 проверяет lifecycle конфигурации, отказные сценарии и изоляцию. Варианты A–C и kernel-контракт ниже сохранены для исторического контекста и отдельных профилей. Статус ADR-001 остаётся `PROPOSED` до проверки поставляемой архитектуры. [A/B](../ENGINE_VS_KERNEL_DECISION.md) · [Xray lifecycle](../XRAY_MVP_LIFECYCLE.md)
+Владелец утвердил вариант D и Xray 26.10.31 для WG/VLESS MVP по результатам A/B на `b35c5de`. Working Core переиспользует IPC, авторизацию, LKG и транзакции Agent. FastAPI собирает профиль из настроек и состояния панели. Xray Agent независимо ограничивает профиль заранее подготовленным namespace и listener. Публикация и provisioning принадлежат оператору. Kernel WireGuard, TUN/TPROXY, nftables, IP routes и Registry заморожены до конкретной потребности. Варианты A–C и kernel-контракт ниже сохранены для исторического контекста и отдельных профилей. Статус ADR-001 остаётся `PROPOSED` до проверки поставляемой архитектуры. [A/B](../ENGINE_VS_KERNEL_DECISION.md) · [Xray lifecycle](../XRAY_MVP_LIFECYCLE.md)
 
 ## Полномочия и граница IPC
 
@@ -33,7 +33,11 @@ Production PiTun соединяет HTTP, DB, Xray, host PID/network, Docker soc
 - `CAP_NET_ADMIN` — кандидат для nftables, маршрутов, link/addr и kernel WG в целевом namespace. TUN требует доступа к `/dev/net/tun` при его фактическом использовании, с проверкой владельца и прав на создание/открытие устройства. `CAP_NET_RAW` рассматривать только для подтверждённых raw/mark операций отдельного процесса; проверить `SO_MARK` и `IP_TRANSPARENT` на целевом ядре. `CAP_NET_BIND_SERVICE` обсуждать только при необходимости низкого порта с учётом настройки namespace. Ни один из этих доступов не назначается API. Runtime не загружает модули ядра и не требует `CAP_SYS_ADMIN`; готовность ядра и создание namespace — preflight и setup оператора. [Linux capabilities](https://man7.org/linux/man-pages/man7/capabilities.7.html).
 - Кандидаты для unit hardening — отдельный UID, `NoNewPrivileges`, минимальные `CapabilityBoundingSet`/`AmbientCapabilities`, `ProtectSystem`, `ProtectHome`, ограничение адресных семейств, устройств и путей записи. Проверить совместимость с netlink, IPC и TUN. Журналы агента и резервные снимки защищаются от записи из API, вывод маскирует ключи. Engine не наследует полномочия агента.
 
-## Apply и восстановление
+## Apply и восстановление Working Core
+
+Control Plane передаёт версионированный `XrayPlan`. Agent валидирует конфиг закреплённым Xray, записывает durable intent, меняет рабочий файл атомарно и управляет фиксированными unit. Успешные WireGuard TCP/UDP/DNS пробы подтверждают поколение. При отказе, истечении дедлайна или рестарте сохраняется подтверждённый LKG либо закрывается ingress. Отозванные ключи исключаются из восстановления. [Контракт и результаты](../XRAY_MVP_LIFECYCLE.md)
+
+## Исторический контракт kernel-профиля
 
 1. Агент принимает план с идентификатором поколения и проверяет ownership и коллизии. Сохраняет diff кандидата и полный last-known-good для собственных объектов. Stage не меняет активное состояние.
 2. Перед изменениями записывает durable pending transaction и deadline. Каждая `NetworkPlan` обязана содержать явную default-block policy для `protected_ingress`; любая allow policy требует route к тому же разрешённому egress. Сначала агент устанавливает/сохраняет deny, затем применяет nft batch и упорядоченные операции ip/WG/engine. Разрешение потока появляется только после успешного применения маршрута и Verify. Один nft batch атомарен внутри nftables. Остальные подсистемы используют компенсирующие операции и явные проверки результатов.
@@ -42,8 +46,8 @@ Production PiTun соединяет HTTP, DB, Xray, host PID/network, Docker soc
 
 ## Что подтвердить перед принятием
 
-- Снять возможности реальных процессов через `/proc/*/status`, проверить отсутствие доступа к чужим namespace/объектам, Docker API и системным файлам. Сравнить nft/ip/sysctl снимки и доступность контрольного канала до/после.
-- Проверить namespaced WG ingress и отдельный egress через внешний IP, TCP/UDP и DNS, IPv4/IPv6 и отзыв peer. Отдельно измерить, нужна ли host-side маршрутизация для LAN mode, и сравнить kernel WG с возможностями закреплённого Xray. Проверить TUN JSON и какие настройки движка меняют namespace.
-- Провести fault injection на VM: коллизии, invalid config, ошибка nft/ip после частичного apply, drop Agent/IPC/engine, reboot до confirm, отказ egress и отказ rollback. Проверить автоматический возврат, ручной recovery и независимый SSH.
+- Для Working Core снять возможности реальных процессов через `/proc/*/status`, проверить отсутствие доступа к чужим namespace/объектам, Docker API и системным файлам. Сравнить nft/ip/sysctl снимки и доступность контрольного канала до/после.
+- Проверить namespaced WG ingress и отдельный egress через внешний IP, TCP/UDP и DNS, IPv4/IPv6 и отзыв peer. Проверки host-side LAN и TUN относятся к возможным будущим профилям.
+- Провести fault injection на VM: коллизии, invalid config, drop Agent/IPC/engine, reboot до confirm, отказ egress и отказ rollback. Проверить автоматический возврат, ручной recovery и независимый SSH.
 
 Если проверки выявят необходимость дополнительных host-привилегий, сначала описать фактическую операцию, альтернативу и остаточный риск. Контракт v1 не меняет wire fields или IPC version: новые обязательные проверки выражены существующими `set_egress_policy` и `ensure_route`, поэтому version bump не требуется; план без default-block теперь семантически недействителен. Исходный contract и privilege-free mock из 2.1 дополнены принятыми AF_UNIX peer-auth и table-only Linux испытаниями. Userspace Xray lifecycle описан отдельно. Контрактные mock-тесты не доказывают отсутствие реальных IPv4/IPv6/DNS утечек. Gate 1 принят владельцем по run #5 (`38fec1220c250b3b398e9160842e301d92d9d356`), но это не является архитектурным испытанием и не меняет статус ADR-001: **PROPOSED**.
