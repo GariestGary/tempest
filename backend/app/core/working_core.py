@@ -111,6 +111,9 @@ def _public_key(key: X25519PrivateKey) -> str:
     )).decode("ascii")
 
 
+MAX_SAVED_EGRESSES = 64
+
+
 ClientName = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[^\x00-\x1f\x7f]+$")]
 
 
@@ -135,7 +138,7 @@ class Provider(ContractModel):
 class Draft(ContractModel):
     revision: int = Field(default=0, ge=0)
     encrypted_vless: str | None = Field(default=None, repr=False)
-    saved_egresses: tuple[SavedEgress, ...] = Field(default=(), max_length=64)
+    saved_egresses: tuple[SavedEgress, ...] = Field(default=(), max_length=MAX_SAVED_EGRESSES)
     providers: tuple[Provider, ...] = Field(default=(), max_length=64)
     selected_egress_id: UUID | None = None
     clients: tuple[Client, ...] = Field(default=(), max_length=MAX_PEERS)

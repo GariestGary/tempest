@@ -4,6 +4,7 @@ sqlmodel==0.0.19
 pydantic==2.13.4
 pydantic-settings==2.14.2
 httpx[socks]==0.28.1
+h11==0.16.0  # Working Core's pinned-address subscription HTTPS request
 aiofiles==25.1.0
 python-multipart==0.0.32
 websockets==16.0

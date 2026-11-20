@@ -11,9 +11,10 @@ type Agent = {
   pending_generation_id: string | null
   last_error: string | null
 }
+type Provider = { id: string; name: string }
 type Gateway = {
   revision: number
-  providers: { id: string; name: string }[]
+  providers: Provider[]
   saved_egresses: { id: string; name: string; provider_id: string | null }[]
   selected_egress_id: string | null
   vless: { address: string; port: number; server_name: string } | null
@@ -43,6 +44,98 @@ function errorMessage(error: unknown) {
     return error.response.data.detail
   }
   return 'Не удалось выполнить запрос. Обновите статус перед повтором.'
+}
+
+const importStatuses = {
+  ready: 'Будет добавлен',
+  duplicate: 'Дубликат',
+  unsupported_protocol: 'Другой протокол или формат',
+  incompatible_vless: 'Несовместимый VLESS TCP/TLS или отсутствует IP домена',
+  deployment_conflict: 'Конфликт с параметрами Working Core',
+  catalog_full: 'Нет места в каталоге',
+}
+
+type SubscriptionPreview = {
+  preview_id: string | null
+  revision: number
+  results: { line: number; status: keyof typeof importStatuses; name?: string }[]
+}
+
+function SubscriptionImport({ providers, revision, busy, run }: {
+  providers: Provider[]
+  revision: number
+  busy: boolean
+  run: (operation: () => Promise<string>) => Promise<void>
+}) {
+  const [mode, setMode] = useState<'content' | 'url'>('content')
+  const [preview, setPreview] = useState<(SubscriptionPreview & { providerId: string }) | null>(null)
+  const ready = preview?.results.filter(item => item.status === 'ready').length ?? 0
+
+  function showPreview(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const body = new FormData(form)
+    const providerId = value(body, 'subscriptionProvider')
+    setPreview(null)
+    void run(async () => {
+      const dialIps = Object.fromEntries(value(body, 'dialIps').split(/\r?\n/).filter(line => line.trim()).map(line => {
+        const [host, address, ...extra] = line.trim().split(/\s+/)
+        if (!address || extra.length) throw new Error('invalid dial IP mapping')
+        return [host, address]
+      }))
+      const result = (await http.post<SubscriptionPreview>(
+        `/core/providers/${providerId}/subscription/preview`,
+        { revision, [mode]: value(body, 'subscriptionSource'), dial_ips: dialIps },
+      )).data
+      const source = form.elements.namedItem('subscriptionSource') as HTMLInputElement | HTMLTextAreaElement
+      source.value = ''
+      setPreview({ ...result, providerId })
+      return ''
+    })
+  }
+
+  return <details className="rounded-lg border border-gray-800 p-3">
+    <summary className="cursor-pointer font-medium">Импорт подписки VLESS</summary>
+    <form className="mt-3" onSubmit={showPreview} onChange={() => setPreview(null)}>
+      <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
+        <label>Провайдер для импорта<select name="subscriptionProvider" className={field} required defaultValue="">
+          <option value="" disabled>Выберите провайдера</option>
+          {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+        </select></label>
+        <label>Источник<select className={field} value={mode} onChange={event => setMode(event.target.value === 'url' ? 'url' : 'content')}>
+          <option value="content">Текст или Base64</option>
+          <option value="url">HTTPS-ссылка</option>
+        </select></label>
+        {mode === 'content'
+          ? <label className="sm:col-span-2">Содержимое подписки<textarea name="subscriptionSource" className={field} required rows={4}
+              maxLength={24576} autoComplete="off" spellCheck={false} placeholder="Ссылки VLESS по одной на строку или список в Base64" /></label>
+          : <label className="sm:col-span-2">HTTPS-ссылка подписки<input name="subscriptionSource" className={field} required type="password"
+              maxLength={4096} autoComplete="off" /></label>}
+        <label className="sm:col-span-2">IP для доменов выходов (если нужны)
+          <textarea name="dialIps" className={field} rows={2} maxLength={8192} spellCheck={false} placeholder="vpn.example.org 192.0.2.20" />
+          <span className="text-sm text-gray-400">Один домен и один IP через пробел на строку. Указывайте домен из адреса VLESS, если вместо IP в ссылке указан домен.</span>
+        </label>
+        <button className={secondary}>Предпросмотр подписки</button>
+      </fieldset>
+    </form>
+    {preview && <div className="mt-3 space-y-2">
+      <p role="status">К добавлению: {ready}. Пропущено: {preview.results.length - ready}.</p>
+      <ul className="max-h-56 overflow-y-auto text-sm text-gray-300">
+        {preview.results.map(item => <li key={item.line}>
+          Строка {item.line} · {importStatuses[item.status]}{item.name && ` · ${item.name}`}
+        </li>)}
+      </ul>
+      {revision !== preview.revision && <p className="text-sm text-amber-400">Черновик изменился. Сделайте предпросмотр ещё раз.</p>}
+      {preview.preview_id && <button className={primary} disabled={busy || revision !== preview.revision} onClick={() => void run(async () => {
+        const response = await http.post<{ added: number }>(
+          `/core/providers/${preview.providerId}/subscription/commit`,
+          { revision: preview.revision, preview_id: preview.preview_id },
+        )
+        setPreview(null)
+        return `Выходов добавлено в каталог: ${response.data.added}.`
+      })}>Добавить выходы в каталог</button>}
+    </div>}
+  </details>
 }
 
 export function WorkingCore() {
@@ -265,6 +358,7 @@ export function WorkingCore() {
                 })
               }}>Удалить провайдера</button>
             </li>)}</ul>}
+            {!!data.providers?.length && <SubscriptionImport providers={data.providers} revision={data.revision} busy={busy} run={run} />}
             <form onSubmit={addSavedEgress}>
               <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
                 <label>Название<input name="name" className={field} maxLength={64} required /></label>

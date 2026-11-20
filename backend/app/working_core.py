@@ -7,21 +7,29 @@ import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
+from typing import Annotated
 from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import Field, ValidationError
+from pydantic import Field, IPvAnyAddress, SecretStr, ValidationError, model_validator
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api import auth
 from app.config import settings
 from app.core.auth import get_current_user, hash_password
-from app.core.working_core import ClientName, Deployment, Draft, Provider, SavedEgress, VlessImport
+from app.core.working_core import (
+    MAX_SAVED_EGRESSES, ClientName, Deployment, Draft, Provider, SavedEgress, VlessImport,
+)
+from app.core.working_core_subscription import (
+    MAX_PASTED_BYTES, SubscriptionError, fetch_subscription, parse_exit, subscription_lines,
+)
 from app.database import create_db_and_tables, get_async_engine, get_session
 from app.models import Settings as DBSetting, User
 from app.network_agent.client import NetworkAgentRejected, NetworkAgentUnavailable
@@ -32,6 +40,17 @@ from app.network_agent.xray_profile import MAX_PEERS, MAX_RULES, DestinationRule
 logger = logging.getLogger(__name__)
 _DRAFT_KEY = "tempest_working_core_v1"
 _NO_CACHE = {"Cache-Control": "no-store"}
+_IMPORT_PREVIEW_TTL = 600
+_MAX_IMPORT_PREVIEWS = 16
+
+
+@dataclass(frozen=True)
+class ImportPreview:
+    user_id: int
+    provider_id: UUID
+    revision: int
+    expires_at: float
+    exits: tuple[SavedEgress, ...]
 
 
 def read_private_file(variable: str, max_length: int) -> str:
@@ -63,6 +82,7 @@ async def lifespan(api: FastAPI):
     api.state.cipher = Fernet(base64.urlsafe_b64encode(key))
     api.state.agent = XrayAgentClient(os.getenv("TEMPEST_XRAY_AGENT_SOCKET", DEFAULT_SOCKET), timeout=65.0)
     api.state.change_lock = asyncio.Lock()
+    api.state.import_previews = {}
 
     await asyncio.to_thread(create_db_and_tables)
     async with AsyncSession(get_async_engine()) as session:
@@ -93,8 +113,12 @@ def health():
 def _load_vless(draft: Draft) -> VlessTLS | None:
     if draft.encrypted_vless is None:
         return None
+    return _decrypt_vless(draft.encrypted_vless)
+
+
+def _decrypt_vless(encrypted: str) -> VlessTLS:
     try:
-        return VlessTLS.model_validate_json(app.state.cipher.decrypt(draft.encrypted_vless.encode()))
+        return VlessTLS.model_validate_json(app.state.cipher.decrypt(encrypted.encode()))
     except (InvalidToken, ValidationError):
         raise HTTPException(503, "Stored VLESS credentials cannot be read") from None
 
@@ -254,6 +278,132 @@ async def delete_provider(provider_id: UUID, body: DraftRevision, session: Async
         await _save(session, draft, row, providers=tuple(item for item in draft.providers if item.id != provider_id))
 
 
+class SubscriptionPreviewRequest(DraftRevision):
+    content: SecretStr | None = Field(default=None, min_length=1, max_length=MAX_PASTED_BYTES)
+    url: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
+    dial_ips: dict[Annotated[str, Field(min_length=1, max_length=253)], IPvAnyAddress] = Field(
+        default_factory=dict, max_length=64,
+    )
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "SubscriptionPreviewRequest":
+        if (self.content is None) == (self.url is None):
+            raise ValueError("Specify exactly one subscription source")
+        return self
+
+
+class SubscriptionCommitRequest(DraftRevision):
+    preview_id: UUID
+
+
+def _egress_identity(vless: VlessTLS) -> tuple:
+    return (
+        vless.address, vless.port, vless.client_id, vless.server_name.lower(),
+        vless.certificate_sha256.lower() if vless.certificate_sha256 else None,
+    )
+
+
+def _subscription_candidates(provider_id: UUID, draft: Draft, lines: list[tuple[int, str]], dial_ips: dict):
+    known = {
+        _egress_identity(_decrypt_vless(item.encrypted_vless))
+        for item in draft.saved_egresses if item.provider_id == provider_id
+    }
+    slots = MAX_SAVED_EGRESSES - len(draft.saved_egresses)
+    idle = AgentStatus(state="idle", active_generation=0, last_known_good_generation=0)
+    candidates = []
+    results = []
+    for number, uri in lines:
+        try:
+            vless = parse_exit(uri, dial_ips)
+        except SubscriptionError as exc:
+            results.append({"line": number, "status": str(exc)})
+            continue
+        identity = _egress_identity(vless)
+        if identity in known:
+            results.append({"line": number, "status": "duplicate"})
+            continue
+        try:
+            _plan(draft, vless, idle)
+        except HTTPException:
+            results.append({"line": number, "status": "deployment_conflict"})
+            continue
+        if len(candidates) == slots:
+            results.append({"line": number, "status": "catalog_full"})
+            continue
+        name = f"VLESS #{number} · {vless.address.compressed} · {vless.port}"
+        encrypted = app.state.cipher.encrypt(vless.model_dump_json().encode()).decode()
+        candidates.append(SavedEgress(id=uuid4(), name=name, encrypted_vless=encrypted, provider_id=provider_id))
+        results.append({"line": number, "status": "ready", "name": name})
+        known.add(identity)
+    return tuple(candidates), results
+
+
+def _import_previews() -> dict[UUID, ImportPreview]:
+    previews = app.state.import_previews
+    now = monotonic()
+    for key, value in tuple(previews.items()):
+        if value.expires_at <= now:
+            del previews[key]
+    return previews
+
+
+@app.post("/api/core/providers/{provider_id}/subscription/preview")
+async def preview_subscription(
+    provider_id: UUID, body: SubscriptionPreviewRequest, response: Response,
+    user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session),
+):
+    response.headers.update(_NO_CACHE)
+    try:
+        if body.url is not None:
+            content = await fetch_subscription(body.url.get_secret_value())
+        else:
+            content = body.content.get_secret_value()
+            if len(content.encode("utf-8")) > MAX_PASTED_BYTES:
+                raise SubscriptionError("Pasted subscription exceeds 24 KiB")
+        lines = subscription_lines(content)
+    except (SubscriptionError, UnicodeError) as exc:
+        detail = str(exc) if isinstance(exc, SubscriptionError) else "Invalid UTF-8 subscription"
+        raise HTTPException(422, detail, headers=_NO_CACHE) from None
+
+    async with app.state.change_lock:
+        draft, _ = await _draft(session)
+        _check_revision(body.revision, draft)
+        if not any(item.id == provider_id for item in draft.providers):
+            raise HTTPException(404, "Provider not found")
+        dial_ips = {host.lower(): address for host, address in body.dial_ips.items()}
+        exits, results = _subscription_candidates(provider_id, draft, lines, dial_ips)
+        preview_id = None
+        if exits:
+            previews = _import_previews()
+            # The cache is bounded. An evicted preview has the same behavior as an expired one.
+            if len(previews) >= _MAX_IMPORT_PREVIEWS:
+                del previews[next(iter(previews))]
+            preview_id = uuid4()
+            previews[preview_id] = ImportPreview(
+                user.id, provider_id, draft.revision, monotonic() + _IMPORT_PREVIEW_TTL, exits,
+            )
+    return {"preview_id": preview_id, "revision": draft.revision, "results": results}
+
+
+@app.post("/api/core/providers/{provider_id}/subscription/commit")
+async def commit_subscription(
+    provider_id: UUID, body: SubscriptionCommitRequest, response: Response,
+    user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session),
+):
+    response.headers.update(_NO_CACHE)
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        previews = _import_previews()
+        preview = previews.get(body.preview_id)
+        if (preview is None or preview.user_id != user.id or preview.provider_id != provider_id
+                or preview.revision != draft.revision):
+            raise HTTPException(409, "Subscription preview expired or changed. Preview it again.")
+        await _save(session, draft, row, saved_egresses=(*draft.saved_egresses, *preview.exits))
+        del previews[body.preview_id]
+    return {"added": len(preview.exits)}
+
+
 @app.put("/api/core/egresses/{egress_id}/provider", status_code=204, dependencies=_authenticated)
 async def assign_provider(egress_id: UUID, body: EgressAssignment, session: AsyncSession = Depends(get_session)):
     async with app.state.change_lock:
@@ -276,7 +426,7 @@ async def add_saved_egress(body: SavedEgressImport, session: AsyncSession = Depe
     async with app.state.change_lock:
         draft, row = await _draft(session)
         _check_revision(body.revision, draft)
-        if len(draft.saved_egresses) >= 64:
+        if len(draft.saved_egresses) >= MAX_SAVED_EGRESSES:
             raise HTTPException(409, "Saved egress limit reached")
         if body.provider_id is not None and not any(item.id == body.provider_id for item in draft.providers):
             raise HTTPException(404, "Provider not found")
@@ -295,7 +445,7 @@ async def select_saved_egress(egress_id: UUID, body: DraftRevision, session: Asy
         item = next((entry for entry in draft.saved_egresses if entry.id == egress_id), None)
         if item is None:
             raise HTTPException(404, "Saved egress not found")
-        vless = _load_vless(Draft(encrypted_vless=item.encrypted_vless))
+        vless = _decrypt_vless(item.encrypted_vless)
         _plan(draft, vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
         await _save(session, draft, row, encrypted_vless=item.encrypted_vless, selected_egress_id=item.id)
 

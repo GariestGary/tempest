@@ -9,6 +9,41 @@ vi.mock('@/api/client', () => ({
 }))
 
 describe('Working Core panel', () => {
+  it('previews subscription results and only adds exits after explicit confirmation', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 7, vless: null, clients: [], rules: [], resolvers: [], agent: null,
+      providers: [{ id: 'provider-1', name: 'VPS' }], saved_egresses: [], selected_egress_id: null,
+    } })
+    vi.mocked(http.post).mockReset()
+      .mockResolvedValueOnce({ data: {
+        revision: 7, preview_id: 'preview-1', results: [
+          { line: 1, status: 'ready', name: 'VLESS #1' },
+          { line: 2, status: 'duplicate' },
+        ],
+      } })
+      .mockResolvedValueOnce({ data: { added: 1 } })
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    fireEvent.click(await screen.findByText('Импорт подписки VLESS'))
+    fireEvent.change(screen.getByLabelText('Провайдер для импорта'), { target: { value: 'provider-1' } })
+    const source = screen.getByLabelText('Содержимое подписки')
+    fireEvent.change(source, { target: { value: 'fixture-subscription-content' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр подписки' }))
+
+    const confirm = await screen.findByRole('button', { name: 'Добавить выходы в каталог' })
+    expect(http.post).toHaveBeenCalledExactlyOnceWith('/core/providers/provider-1/subscription/preview', {
+      revision: 7, content: 'fixture-subscription-content', dial_ips: {},
+    })
+    expect(source).toHaveValue('')
+    expect(screen.getByText(/Строка 2 · Дубликат/)).toBeInTheDocument()
+    await waitFor(() => expect(confirm).toBeEnabled())
+    fireEvent.click(confirm)
+    expect(await screen.findByText('Выходов добавлено в каталог: 1.')).toBeInTheDocument()
+    expect(http.post).toHaveBeenLastCalledWith('/core/providers/provider-1/subscription/commit', {
+      revision: 7, preview_id: 'preview-1',
+    })
+    expect(http.post).toHaveBeenCalledTimes(2)
+  })
+
   it('assigns a saved exit to a provider without applying traffic', async () => {
     vi.mocked(http.get).mockResolvedValue({ data: {
       revision: 4, vless: null, clients: [], rules: [], resolvers: [], agent: null,
