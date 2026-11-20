@@ -124,12 +124,19 @@ class SavedEgress(ContractModel):
     id: UUID
     name: ClientName
     encrypted_vless: str = Field(min_length=1, max_length=8192, repr=False)
+    provider_id: UUID | None = None
+
+
+class Provider(ContractModel):
+    id: UUID
+    name: ClientName
 
 
 class Draft(ContractModel):
     revision: int = Field(default=0, ge=0)
     encrypted_vless: str | None = Field(default=None, repr=False)
     saved_egresses: tuple[SavedEgress, ...] = Field(default=(), max_length=64)
+    providers: tuple[Provider, ...] = Field(default=(), max_length=64)
     selected_egress_id: UUID | None = None
     clients: tuple[Client, ...] = Field(default=(), max_length=MAX_PEERS)
     rules: tuple[DestinationRule, ...] = Field(default=(), max_length=MAX_RULES)

@@ -5,10 +5,24 @@ import { http } from '@/api/client'
 import { WorkingCore } from '@/pages/WorkingCore'
 
 vi.mock('@/api/client', () => ({
-  http: { get: vi.fn(), post: vi.fn() },
+  http: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
 }))
 
 describe('Working Core panel', () => {
+  it('assigns a saved exit to a provider without applying traffic', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 4, vless: null, clients: [], rules: [], resolvers: [], agent: null,
+      providers: [{ id: 'provider-1', name: 'VPS' }],
+      saved_egresses: [{ id: 'exit-1', name: 'Amsterdam', provider_id: null }], selected_egress_id: null,
+    } })
+    vi.mocked(http.put).mockReset().mockResolvedValue({ data: null })
+    vi.mocked(http.post).mockReset()
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    fireEvent.change(await screen.findByLabelText('Провайдер выхода «Amsterdam»'), { target: { value: 'provider-1' } })
+    await waitFor(() => expect(http.put).toHaveBeenCalledWith('/core/egresses/exit-1/provider', { revision: 4, provider_id: 'provider-1' }))
+    expect(http.post).not.toHaveBeenCalled()
+  })
+
   it('selects a saved exit in the draft without applying it', async () => {
     vi.mocked(http.get).mockResolvedValue({ data: {
       revision: 9, vless: null, clients: [], rules: [], resolvers: [], agent: null,

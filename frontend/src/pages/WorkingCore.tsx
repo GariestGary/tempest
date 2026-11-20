@@ -13,7 +13,8 @@ type Agent = {
 }
 type Gateway = {
   revision: number
-  saved_egresses: { id: string; name: string }[]
+  providers: { id: string; name: string }[]
+  saved_egresses: { id: string; name: string; provider_id: string | null }[]
   selected_egress_id: string | null
   vless: { address: string; port: number; server_name: string } | null
   clients: { id: string; name: string; addresses: string[] }[]
@@ -124,6 +125,7 @@ export function WorkingCore() {
     void run(async () => {
       await http.post('/core/egresses', {
         revision: data.revision, name: value(body, 'name'),
+        provider_id: value(body, 'provider') || null,
         uri: { uri: value(body, 'uri'), dial_address: value(body, 'address') || null },
       })
       form.reset()
@@ -230,11 +232,43 @@ export function WorkingCore() {
           </section>
 
           <section className={panel} aria-labelledby="saved-egresses-heading">
-            <h2 id="saved-egresses-heading" className="text-lg font-semibold">Сохранённые выходы VLESS</h2>
+            <h2 id="saved-egresses-heading" className="text-lg font-semibold">Провайдеры и выходы VLESS</h2>
             <p className="text-sm text-gray-400">Выбранный выход используется всеми правилами VLESS после применения конфигурации.</p>
+            <form onSubmit={event => {
+              event.preventDefault()
+              const form = event.currentTarget
+              const name = value(new FormData(form), 'providerName')
+              void run(async () => {
+                await http.post('/core/providers', { revision: data.revision, name })
+                form.reset()
+                return 'Провайдер добавлен.'
+              })
+            }} className="flex flex-wrap items-end gap-2">
+              <label>Название провайдера<input name="providerName" className={field} maxLength={64} required /></label>
+              <button className={secondary} disabled={busy}>Добавить провайдера</button>
+            </form>
+            {!!data.providers?.length && <ul className="space-y-2">{data.providers.map(provider => <li key={provider.id} className="flex flex-wrap items-center gap-2">
+              <span>{provider.name}</span>
+              <button className={secondary} disabled={busy} onClick={() => {
+                const name = window.prompt('Новое название провайдера', provider.name)?.trim()
+                if (!name) return
+                void run(async () => {
+                  await http.put(`/core/providers/${provider.id}`, { revision: data.revision, name })
+                  return 'Провайдер переименован.'
+                })
+              }}>Переименовать</button>
+              <button className={secondary} disabled={busy || data.saved_egresses.some(item => item.provider_id === provider.id)} onClick={() => {
+                if (!window.confirm(`Удалить провайдера «${provider.name}»?`)) return
+                void run(async () => {
+                  await http.delete(`/core/providers/${provider.id}`, { data: { revision: data.revision } })
+                  return 'Провайдер удалён.'
+                })
+              }}>Удалить провайдера</button>
+            </li>)}</ul>}
             <form onSubmit={addSavedEgress}>
               <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
                 <label>Название<input name="name" className={field} maxLength={64} required /></label>
+                <label>Провайдер<select name="provider" className={field} defaultValue=""><option value="">Без провайдера</option>{data.providers?.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
                 <label>IP выхода (если в ссылке домен)<input name="address" className={field} /></label>
                 <label className="sm:col-span-2">Ссылка VLESS TCP/TLS<input type="password" name="uri" className={field} maxLength={4096} autoComplete="off" required /></label>
                 <button className={primary}>Сохранить выход</button>
@@ -243,6 +277,13 @@ export function WorkingCore() {
             {!!data.saved_egresses?.length && <ul className="divide-y divide-gray-800">
               {data.saved_egresses.map(item => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <span>{item.name}{item.id === data.selected_egress_id ? ' · выбран в черновике' : ''}</span>
+                <label>Провайдер выхода «{item.name}»<select className={field} value={item.provider_id ?? ''} disabled={busy} onChange={event => {
+                  const provider_id = event.target.value || null
+                  void run(async () => {
+                    await http.put(`/core/egresses/${item.id}/provider`, { revision: data.revision, provider_id })
+                    return 'Провайдер выхода изменён.'
+                  })
+                }}><option value="">Без провайдера</option>{data.providers?.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
                 <div className="flex gap-2">
                   <button className={secondary} disabled={busy || item.id === data.selected_egress_id} onClick={() => void run(async () => {
                     await http.post(`/core/egresses/${item.id}/select`, { revision: data.revision })

@@ -21,7 +21,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api import auth
 from app.config import settings
 from app.core.auth import get_current_user, hash_password
-from app.core.working_core import ClientName, Deployment, Draft, SavedEgress, VlessImport
+from app.core.working_core import ClientName, Deployment, Draft, Provider, SavedEgress, VlessImport
 from app.database import create_db_and_tables, get_async_engine, get_session
 from app.models import Settings as DBSetting, User
 from app.network_agent.client import NetworkAgentRejected, NetworkAgentUnavailable
@@ -164,7 +164,8 @@ async def current(response: Response, session: AsyncSession = Depends(get_sessio
         agent_error = exc.detail
     return {
         "revision": draft.revision,
-        "saved_egresses": [{"id": item.id, "name": item.name} for item in draft.saved_egresses],
+        "providers": [{"id": item.id, "name": item.name} for item in draft.providers],
+        "saved_egresses": [{"id": item.id, "name": item.name, "provider_id": item.provider_id} for item in draft.saved_egresses],
         "selected_egress_id": draft.selected_egress_id,
         "vless": vless.model_dump(exclude={"client_id", "certificate_sha256"}) if vless else None,
         "clients": [
@@ -207,6 +208,63 @@ class DraftRevision(ContractModel):
 class SavedEgressImport(DraftRevision):
     name: ClientName
     uri: VlessImport
+    provider_id: UUID | None = None
+
+
+class ProviderEdit(DraftRevision):
+    name: ClientName
+
+
+class EgressAssignment(DraftRevision):
+    provider_id: UUID | None = None
+
+
+@app.post("/api/core/providers", status_code=201, dependencies=_authenticated)
+async def create_provider(body: ProviderEdit, session: AsyncSession = Depends(get_session)):
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        if len(draft.providers) >= 64:
+            raise HTTPException(409, "Provider limit reached")
+        provider = Provider(id=uuid4(), name=body.name)
+        await _save(session, draft, row, providers=(*draft.providers, provider))
+    return {"id": provider.id, "name": provider.name}
+
+
+@app.put("/api/core/providers/{provider_id}", status_code=204, dependencies=_authenticated)
+async def rename_provider(provider_id: UUID, body: ProviderEdit, session: AsyncSession = Depends(get_session)):
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        if not any(item.id == provider_id for item in draft.providers):
+            raise HTTPException(404, "Provider not found")
+        providers = tuple(item.model_copy(update={"name": body.name}) if item.id == provider_id else item for item in draft.providers)
+        await _save(session, draft, row, providers=providers)
+
+
+@app.delete("/api/core/providers/{provider_id}", status_code=204, dependencies=_authenticated)
+async def delete_provider(provider_id: UUID, body: DraftRevision, session: AsyncSession = Depends(get_session)):
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        if not any(item.id == provider_id for item in draft.providers):
+            raise HTTPException(404, "Provider not found")
+        if any(item.provider_id == provider_id for item in draft.saved_egresses):
+            raise HTTPException(409, "Move or delete the provider's exits first")
+        await _save(session, draft, row, providers=tuple(item for item in draft.providers if item.id != provider_id))
+
+
+@app.put("/api/core/egresses/{egress_id}/provider", status_code=204, dependencies=_authenticated)
+async def assign_provider(egress_id: UUID, body: EgressAssignment, session: AsyncSession = Depends(get_session)):
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        if not any(item.id == egress_id for item in draft.saved_egresses):
+            raise HTTPException(404, "Saved egress not found")
+        if body.provider_id is not None and not any(item.id == body.provider_id for item in draft.providers):
+            raise HTTPException(404, "Provider not found")
+        exits = tuple(item.model_copy(update={"provider_id": body.provider_id}) if item.id == egress_id else item for item in draft.saved_egresses)
+        await _save(session, draft, row, saved_egresses=exits)
 
 
 @app.post("/api/core/egresses", status_code=201, dependencies=_authenticated)
@@ -220,9 +278,11 @@ async def add_saved_egress(body: SavedEgressImport, session: AsyncSession = Depe
         _check_revision(body.revision, draft)
         if len(draft.saved_egresses) >= 64:
             raise HTTPException(409, "Saved egress limit reached")
+        if body.provider_id is not None and not any(item.id == body.provider_id for item in draft.providers):
+            raise HTTPException(404, "Provider not found")
         _plan(draft, vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
         encrypted = app.state.cipher.encrypt(vless.model_dump_json().encode()).decode()
-        item = SavedEgress(id=uuid4(), name=body.name, encrypted_vless=encrypted)
+        item = SavedEgress(id=uuid4(), name=body.name, encrypted_vless=encrypted, provider_id=body.provider_id)
         await _save(session, draft, row, saved_egresses=(*draft.saved_egresses, item))
     return {"id": item.id, "name": item.name}
 
