@@ -13,6 +13,8 @@ type Agent = {
 }
 type Gateway = {
   revision: number
+  saved_egresses: { id: string; name: string }[]
+  selected_egress_id: string | null
   vless: { address: string; port: number; server_name: string } | null
   clients: { id: string; name: string; addresses: string[] }[]
   rules: Rule[]
@@ -114,6 +116,21 @@ export function WorkingCore() {
     })
   }
 
+  function addSavedEgress(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!data) return
+    const form = event.currentTarget
+    const body = new FormData(form)
+    void run(async () => {
+      await http.post('/core/egresses', {
+        revision: data.revision, name: value(body, 'name'),
+        uri: { uri: value(body, 'uri'), dial_address: value(body, 'address') || null },
+      })
+      form.reset()
+      return 'Выход сохранён. Выберите его и примените изменения.'
+    })
+  }
+
   function saveRules(rules: Rule[]) {
     if (!data) return
     void run(async () => {
@@ -210,6 +227,37 @@ export function WorkingCore() {
               })}>Применить конфигурацию</button>
             </div>}
             {busy && <p role="status" className="text-sm text-gray-400">Выполняется запрос…</p>}
+          </section>
+
+          <section className={panel} aria-labelledby="saved-egresses-heading">
+            <h2 id="saved-egresses-heading" className="text-lg font-semibold">Сохранённые выходы VLESS</h2>
+            <p className="text-sm text-gray-400">Выбранный выход используется всеми правилами VLESS после применения конфигурации.</p>
+            <form onSubmit={addSavedEgress}>
+              <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
+                <label>Название<input name="name" className={field} maxLength={64} required /></label>
+                <label>IP выхода (если в ссылке домен)<input name="address" className={field} /></label>
+                <label className="sm:col-span-2">Ссылка VLESS TCP/TLS<input type="password" name="uri" className={field} maxLength={4096} autoComplete="off" required /></label>
+                <button className={primary}>Сохранить выход</button>
+              </fieldset>
+            </form>
+            {!!data.saved_egresses?.length && <ul className="divide-y divide-gray-800">
+              {data.saved_egresses.map(item => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <span>{item.name}{item.id === data.selected_egress_id ? ' · выбран в черновике' : ''}</span>
+                <div className="flex gap-2">
+                  <button className={secondary} disabled={busy || item.id === data.selected_egress_id} onClick={() => void run(async () => {
+                    await http.post(`/core/egresses/${item.id}/select`, { revision: data.revision })
+                    return 'Выход выбран в черновике. Проверьте и примените изменения.'
+                  })}>Выбрать</button>
+                  <button className={secondary} disabled={busy || item.id === data.selected_egress_id} onClick={() => {
+                    if (!window.confirm(`Удалить сохранённый выход «${item.name}»?`)) return
+                    void run(async () => {
+                      await http.delete(`/core/egresses/${item.id}`, { data: { revision: data.revision } })
+                      return 'Выход удалён.'
+                    })
+                  }}>Удалить</button>
+                </div>
+              </li>)}
+            </ul>}
           </section>
 
           <div className="grid gap-5 lg:grid-cols-2">

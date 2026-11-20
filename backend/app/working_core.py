@@ -8,7 +8,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, HTTPException, Response
@@ -21,7 +21,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api import auth
 from app.config import settings
 from app.core.auth import get_current_user, hash_password
-from app.core.working_core import ClientName, Deployment, Draft, VlessImport
+from app.core.working_core import ClientName, Deployment, Draft, SavedEgress, VlessImport
 from app.database import create_db_and_tables, get_async_engine, get_session
 from app.models import Settings as DBSetting, User
 from app.network_agent.client import NetworkAgentRejected, NetworkAgentUnavailable
@@ -164,6 +164,8 @@ async def current(response: Response, session: AsyncSession = Depends(get_sessio
         agent_error = exc.detail
     return {
         "revision": draft.revision,
+        "saved_egresses": [{"id": item.id, "name": item.name} for item in draft.saved_egresses],
+        "selected_egress_id": draft.selected_egress_id,
         "vless": vless.model_dump(exclude={"client_id", "certificate_sha256"}) if vless else None,
         "clients": [
             {"id": client.id, "name": client.name, "addresses": client.peer.addresses}
@@ -181,7 +183,7 @@ async def _save_egress(session: AsyncSession, vless: VlessTLS) -> None:
         draft, row = await _draft(session)
         _plan(draft, vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
         encrypted = app.state.cipher.encrypt(vless.model_dump_json().encode()).decode()
-        await _save(session, draft, row, encrypted_vless=encrypted)
+        await _save(session, draft, row, encrypted_vless=encrypted, selected_egress_id=None)
 
 
 @app.put("/api/core/egress", status_code=204, dependencies=_authenticated)
@@ -200,6 +202,54 @@ async def import_egress(body: VlessImport, session: AsyncSession = Depends(get_s
 
 class DraftRevision(ContractModel):
     revision: int = Field(strict=True, ge=0)
+
+
+class SavedEgressImport(DraftRevision):
+    name: ClientName
+    uri: VlessImport
+
+
+@app.post("/api/core/egresses", status_code=201, dependencies=_authenticated)
+async def add_saved_egress(body: SavedEgressImport, session: AsyncSession = Depends(get_session)):
+    try:
+        vless = body.uri.vless()
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        if len(draft.saved_egresses) >= 64:
+            raise HTTPException(409, "Saved egress limit reached")
+        _plan(draft, vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
+        encrypted = app.state.cipher.encrypt(vless.model_dump_json().encode()).decode()
+        item = SavedEgress(id=uuid4(), name=body.name, encrypted_vless=encrypted)
+        await _save(session, draft, row, saved_egresses=(*draft.saved_egresses, item))
+    return {"id": item.id, "name": item.name}
+
+
+@app.post("/api/core/egresses/{egress_id}/select", status_code=204, dependencies=_authenticated)
+async def select_saved_egress(egress_id: UUID, body: DraftRevision, session: AsyncSession = Depends(get_session)):
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        item = next((entry for entry in draft.saved_egresses if entry.id == egress_id), None)
+        if item is None:
+            raise HTTPException(404, "Saved egress not found")
+        vless = _load_vless(Draft(encrypted_vless=item.encrypted_vless))
+        _plan(draft, vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
+        await _save(session, draft, row, encrypted_vless=item.encrypted_vless, selected_egress_id=item.id)
+
+
+@app.delete("/api/core/egresses/{egress_id}", status_code=204, dependencies=_authenticated)
+async def delete_saved_egress(egress_id: UUID, body: DraftRevision, session: AsyncSession = Depends(get_session)):
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        if not any(item.id == egress_id for item in draft.saved_egresses):
+            raise HTTPException(404, "Saved egress not found")
+        if draft.selected_egress_id == egress_id:
+            raise HTTPException(409, "Select another egress before deleting this one")
+        await _save(session, draft, row, saved_egresses=tuple(item for item in draft.saved_egresses if item.id != egress_id))
 
 
 class RuleEdit(DraftRevision):
