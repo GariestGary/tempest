@@ -122,7 +122,7 @@ async def test_subscription_preview_commit_is_append_only_and_revision_bound(cat
     assert response.status_code == 200
     assert response.headers['Cache-Control'] == 'no-store'
     assert [item['status'] for item in response.json()['results']] == [
-        'duplicate', 'ready', 'duplicate', 'unsupported_protocol', 'incompatible_vless', 'incompatible_vless',
+        'duplicate', 'ready', 'duplicate', 'unsupported_protocol', 'incompatible_reality', 'incompatible_vless',
     ]
     secrets = (VLESS_ID, new_id, 'fragment-secret', 'subscription-secret', 'unsupported-secret', 'encrypted_vless')
     assert all(secret not in response.text for secret in secrets)

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { http } from '@/api/client'
 import { WorkingCore } from '@/pages/WorkingCore'
@@ -42,6 +42,41 @@ describe('Working Core panel', () => {
       revision: 7, preview_id: 'preview-1',
     })
     expect(http.post).toHaveBeenCalledTimes(2)
+  })
+
+  it('adds a manually entered Reality exit to the provider without selecting it', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 4, vless: null, clients: [], rules: [], resolvers: [], agent: null,
+      providers: [{ id: 'provider-1', name: 'VPS' }], saved_egresses: [], selected_egress_id: null,
+    } })
+    vi.mocked(http.post).mockReset().mockResolvedValue({ data: { id: 'new-exit' } })
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    const mode = await screen.findByLabelText('Способ добавления выхода')
+    const form = within(mode.closest('form')!)
+    fireEvent.change(mode, { target: { value: 'manual' } })
+    fireEvent.change(form.getByLabelText('Защита VLESS'), { target: { value: 'reality' } })
+    const values = {
+      Название: 'Test exit',
+      Провайдер: 'provider-1',
+      'IP выхода': '192.0.2.20',
+      'Имя сервера (SNI)': 'egress.example.test',
+      'UUID клиента': 'manual-test-id',
+      'Публичный ключ Reality': 'B'.repeat(43),
+      'Short ID (если задан)': 'aabb',
+      Fingerprint: 'firefox',
+      Flow: 'xtls-rprx-vision',
+    }
+    for (const [label, value] of Object.entries(values)) {
+      fireEvent.change(form.getByLabelText(label, { exact: true }), { target: { value } })
+    }
+    fireEvent.click(form.getByRole('button', { name: 'Сохранить выход' }))
+    await waitFor(() => expect(http.post).toHaveBeenCalledExactlyOnceWith('/core/egresses', {
+      revision: 4, name: 'Test exit', provider_id: 'provider-1',
+      config: {
+        address: '192.0.2.20', port: 443, server_name: 'egress.example.test', client_id: 'manual-test-id',
+        reality: { public_key: 'B'.repeat(43), short_id: 'aabb', fingerprint: 'firefox', flow: 'xtls-rprx-vision' },
+      },
+    }))
   })
 
   it('assigns a saved exit to a provider without applying traffic', async () => {

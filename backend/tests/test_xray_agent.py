@@ -167,8 +167,16 @@ def test_verify_before_confirm_restart_and_timeout(state_dir):
         assert not exchange(agent, "confirm", c).ok
 
 
-def test_failed_readiness_rolls_back_only_to_safe_lkg(state_dir):
+@pytest.mark.parametrize("security", ["tls", "reality"])
+def test_failed_readiness_rolls_back_only_to_safe_lkg(state_dir, security):
     a, b = plan(), plan(2, 1)
+    if security == "reality":
+        egress = b.vless.model_dump(mode="json", exclude={"certificate_sha256"})
+        egress["reality"] = {
+            "public_key": base64.urlsafe_b64encode(bytes(range(1, 33))).decode().rstrip("="),
+            "short_id": "aabb", "flow": "xtls-rprx-vision",
+        }
+        b = plan(2, 1, vless=egress)
     runtime = Runtime()
     with XrayJournal(state_dir) as journal:
         agent = make_agent(runtime, journal)
@@ -252,10 +260,23 @@ def test_pinned_xray_accepts_generated_config(tmp_path):
     if not binary:
         pytest.skip("TEMPEST_TEST_XRAY not supplied")
     target = tmp_path / "candidate.json"
-    target.write_bytes(plan().config_bytes())
-    assert subprocess.run(
-        [binary, "run", "-test", "-config", str(target)], capture_output=True, timeout=5
-    ).returncode == 0
+    tls = plan()
+    variants = [("TLS", tls)]
+    common = tls.vless.model_dump(mode="json", exclude={"certificate_sha256"})
+    public_key = base64.urlsafe_b64encode(bytes(range(1, 33))).decode().rstrip("=")
+    for fingerprint in ("chrome", "firefox", "safari", "ios", "edge"):
+        for flow in ("", "xtls-rprx-vision"):
+            egress = {**common, "reality": {
+                "public_key": public_key, "fingerprint": fingerprint, "flow": flow,
+                "short_id": "ab" if flow else "",
+            }}
+            variants.append((f"Reality/{fingerprint}/{flow or 'no flow'}", plan(vless=egress)))
+    for name, profile in variants:
+        target.write_bytes(profile.config_bytes())
+        check = subprocess.run(
+            [binary, "run", "-test", "-config", str(target)], capture_output=True, timeout=5,
+        )
+        assert check.returncode == 0, name
 
 
 def test_confirm_rechecks_traffic_in_the_same_generation(state_dir):

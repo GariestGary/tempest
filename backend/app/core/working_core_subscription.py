@@ -12,8 +12,8 @@ import h11
 from pydantic import ValidationError
 
 from app.core.uri_parser import _b64_decode
-from app.core.working_core import VlessImport
-from app.network_agent.xray_profile import VlessTLS
+from app.core.working_core import VlessImport, VlessImportError
+from app.network_agent.xray_profile import VlessEgress
 
 MAX_PASTED_BYTES = 24 * 1024
 MAX_DOWNLOAD_BYTES = 128 * 1024
@@ -46,7 +46,7 @@ def subscription_lines(content: str) -> list[tuple[int, str]]:
     return lines
 
 
-def parse_exit(uri: str, dial_ips: dict) -> VlessTLS:
+def parse_exit(uri: str, dial_ips: dict) -> VlessEgress:
     if not uri.lower().startswith("vless://"):
         raise SubscriptionError("unsupported_protocol")
     try:
@@ -55,6 +55,8 @@ def parse_exit(uri: str, dial_ips: dict) -> VlessTLS:
         if getattr(vless.address, "scope_id", None) is not None:
             raise ValueError
         return vless
+    except VlessImportError as exc:
+        raise SubscriptionError(exc.status) from None
     except (ValidationError, ValueError):
         raise SubscriptionError("incompatible_vless") from None
 

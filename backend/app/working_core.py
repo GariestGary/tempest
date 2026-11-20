@@ -35,7 +35,7 @@ from app.models import Settings as DBSetting, User
 from app.network_agent.client import NetworkAgentRejected, NetworkAgentUnavailable
 from app.network_agent.models import AgentStatus, ContractModel, NetworkDiff
 from app.network_agent.xray_client import DEFAULT_SOCKET, XrayAgentClient
-from app.network_agent.xray_profile import MAX_PEERS, MAX_RULES, DestinationRule, VlessTLS, XrayPlan
+from app.network_agent.xray_profile import MAX_PEERS, MAX_RULES, DestinationRule, VlessEgress, XrayPlan
 
 logger = logging.getLogger(__name__)
 _DRAFT_KEY = "tempest_working_core_v1"
@@ -110,15 +110,15 @@ def health():
     return {"status": "ok"}
 
 
-def _load_vless(draft: Draft) -> VlessTLS | None:
+def _load_vless(draft: Draft) -> VlessEgress | None:
     if draft.encrypted_vless is None:
         return None
     return _decrypt_vless(draft.encrypted_vless)
 
 
-def _decrypt_vless(encrypted: str) -> VlessTLS:
+def _decrypt_vless(encrypted: str) -> VlessEgress:
     try:
-        return VlessTLS.model_validate_json(app.state.cipher.decrypt(encrypted.encode()))
+        return VlessEgress.model_validate_json(app.state.cipher.decrypt(encrypted.encode()))
     except (InvalidToken, ValidationError):
         raise HTTPException(503, "Stored VLESS credentials cannot be read") from None
 
@@ -159,7 +159,7 @@ async def _agent(method: str, expected: type, **args):
     return response.result
 
 
-def _plan(draft: Draft, vless: VlessTLS, status: AgentStatus) -> XrayPlan:
+def _plan(draft: Draft, vless: VlessEgress, status: AgentStatus) -> XrayPlan:
     try:
         return app.state.deployment.plan(draft, vless, status)
     except ValidationError:
@@ -189,9 +189,15 @@ async def current(response: Response, session: AsyncSession = Depends(get_sessio
     return {
         "revision": draft.revision,
         "providers": [{"id": item.id, "name": item.name} for item in draft.providers],
-        "saved_egresses": [{"id": item.id, "name": item.name, "provider_id": item.provider_id} for item in draft.saved_egresses],
+        "saved_egresses": [
+            {"id": item.id, "name": item.name, "provider_id": item.provider_id, "security": item.security}
+            for item in draft.saved_egresses
+        ],
         "selected_egress_id": draft.selected_egress_id,
-        "vless": vless.model_dump(exclude={"client_id", "certificate_sha256"}) if vless else None,
+        "vless": {
+            "address": vless.address, "port": vless.port,
+            "server_name": vless.server_name, "security": vless.security,
+        } if vless else None,
         "clients": [
             {"id": client.id, "name": client.name, "addresses": client.peer.addresses}
             for client in draft.clients
@@ -203,7 +209,7 @@ async def current(response: Response, session: AsyncSession = Depends(get_sessio
     }
 
 
-async def _save_egress(session: AsyncSession, vless: VlessTLS) -> None:
+async def _save_egress(session: AsyncSession, vless: VlessEgress) -> None:
     async with app.state.change_lock:
         draft, row = await _draft(session)
         _plan(draft, vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
@@ -212,7 +218,7 @@ async def _save_egress(session: AsyncSession, vless: VlessTLS) -> None:
 
 
 @app.put("/api/core/egress", status_code=204, dependencies=_authenticated)
-async def save_egress(egress: VlessTLS, session: AsyncSession = Depends(get_session)):
+async def save_egress(egress: VlessEgress, session: AsyncSession = Depends(get_session)):
     await _save_egress(session, egress)
 
 
@@ -229,10 +235,20 @@ class DraftRevision(ContractModel):
     revision: int = Field(strict=True, ge=0)
 
 
-class SavedEgressImport(DraftRevision):
+class SavedEgressInput(DraftRevision):
     name: ClientName
-    uri: VlessImport
+    uri: VlessImport | None = None
+    config: VlessEgress | None = None
     provider_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "SavedEgressInput":
+        if (self.uri is None) == (self.config is None):
+            raise ValueError("Specify exactly one VLESS source")
+        return self
+
+    def egress(self) -> VlessEgress:
+        return self.config if self.config is not None else self.uri.vless()
 
 
 class ProviderEdit(DraftRevision):
@@ -296,11 +312,13 @@ class SubscriptionCommitRequest(DraftRevision):
     preview_id: UUID
 
 
-def _egress_identity(vless: VlessTLS) -> tuple:
-    return (
-        vless.address, vless.port, vless.client_id, vless.server_name.lower(),
-        vless.certificate_sha256.lower() if vless.certificate_sha256 else None,
-    )
+def _egress_identity(vless: VlessEgress) -> tuple:
+    endpoint = (vless.security, vless.address, vless.port, vless.client_id, vless.server_name.lower())
+    if vless.reality is None:
+        return (*endpoint, vless.certificate_sha256.lower() if vless.certificate_sha256 else None)
+    reality = vless.reality
+    # Xray decodes short IDs into a zero-filled 8-byte array.
+    return (*endpoint, reality.public_key, reality.short_id.ljust(16, "0"), reality.fingerprint, reality.flow)
 
 
 def _subscription_candidates(provider_id: UUID, draft: Draft, lines: list[tuple[int, str]], dial_ips: dict):
@@ -332,8 +350,10 @@ def _subscription_candidates(provider_id: UUID, draft: Draft, lines: list[tuple[
             continue
         name = f"VLESS #{number} · {vless.address.compressed} · {vless.port}"
         encrypted = app.state.cipher.encrypt(vless.model_dump_json().encode()).decode()
-        candidates.append(SavedEgress(id=uuid4(), name=name, encrypted_vless=encrypted, provider_id=provider_id))
-        results.append({"line": number, "status": "ready", "name": name})
+        candidates.append(SavedEgress(
+            id=uuid4(), name=name, encrypted_vless=encrypted, provider_id=provider_id, security=vless.security,
+        ))
+        results.append({"line": number, "status": "ready", "name": name, "security": vless.security})
         known.add(identity)
     return tuple(candidates), results
 
@@ -418,9 +438,9 @@ async def assign_provider(egress_id: UUID, body: EgressAssignment, session: Asyn
 
 
 @app.post("/api/core/egresses", status_code=201, dependencies=_authenticated)
-async def add_saved_egress(body: SavedEgressImport, session: AsyncSession = Depends(get_session)):
+async def add_saved_egress(body: SavedEgressInput, session: AsyncSession = Depends(get_session)):
     try:
-        vless = body.uri.vless()
+        vless = body.egress()
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     async with app.state.change_lock:
@@ -432,7 +452,10 @@ async def add_saved_egress(body: SavedEgressImport, session: AsyncSession = Depe
             raise HTTPException(404, "Provider not found")
         _plan(draft, vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
         encrypted = app.state.cipher.encrypt(vless.model_dump_json().encode()).decode()
-        item = SavedEgress(id=uuid4(), name=body.name, encrypted_vless=encrypted, provider_id=body.provider_id)
+        item = SavedEgress(
+            id=uuid4(), name=body.name, encrypted_vless=encrypted,
+            provider_id=body.provider_id, security=vless.security,
+        )
         await _save(session, draft, row, saved_egresses=(*draft.saved_egresses, item))
     return {"id": item.id, "name": item.name}
 

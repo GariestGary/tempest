@@ -11,13 +11,14 @@ type Agent = {
   pending_generation_id: string | null
   last_error: string | null
 }
+type VlessSecurity = 'tls' | 'reality'
 type Provider = { id: string; name: string }
 type Gateway = {
   revision: number
   providers: Provider[]
-  saved_egresses: { id: string; name: string; provider_id: string | null }[]
+  saved_egresses: { id: string; name: string; provider_id: string | null; security?: VlessSecurity }[]
   selected_egress_id: string | null
-  vless: { address: string; port: number; server_name: string } | null
+  vless: { address: string; port: number; server_name: string; security?: VlessSecurity } | null
   clients: { id: string; name: string; addresses: string[] }[]
   rules: Rule[]
   resolvers: string[]
@@ -39,6 +40,59 @@ function value(form: FormData, key: string) {
   return String(form.get(key) ?? '').trim()
 }
 
+function securityLabel(security?: VlessSecurity) {
+  return security === 'reality' ? 'Reality' : 'TLS'
+}
+
+function manualVless(body: FormData) {
+  const upstream = {
+    address: value(body, 'address'),
+    port: Number(value(body, 'port')),
+    server_name: value(body, 'server_name'),
+    client_id: value(body, 'client_id'),
+  }
+  if (value(body, 'security') !== 'reality') {
+    return { ...upstream, certificate_sha256: value(body, 'pin') || null }
+  }
+  return {
+    ...upstream,
+    reality: {
+      public_key: value(body, 'public_key'),
+      short_id: value(body, 'short_id'),
+      fingerprint: value(body, 'fingerprint'),
+      flow: value(body, 'flow'),
+    },
+  }
+}
+
+function ManualVlessFields() {
+  const [security, setSecurity] = useState<VlessSecurity>('tls')
+  return <div className="grid gap-3 sm:grid-cols-2">
+    <label>Защита VLESS<select name="security" className={field} value={security}
+      onChange={event => setSecurity(event.target.value === 'reality' ? 'reality' : 'tls')}>
+      <option value="tls">TCP/TLS</option>
+      <option value="reality">TCP/Reality</option>
+    </select></label>
+    <label>IP выхода<input name="address" className={field} required /></label>
+    <label>Порт<input name="port" className={field} type="number" defaultValue={443} min={1} max={65535} required /></label>
+    <label>Имя сервера (SNI)<input name="server_name" className={field} maxLength={253} required /></label>
+    <label>UUID клиента<input name="client_id" className={field} type="password" autoComplete="off" required /></label>
+    {security === 'reality' ? <>
+      <label>Публичный ключ Reality<input name="public_key" className={field} type="password" autoComplete="off"
+        pattern="[A-Za-z0-9_\-]{43}" minLength={43} maxLength={43} required /></label>
+      <label>Short ID (если задан)<input name="short_id" className={field} type="password" autoComplete="off"
+        pattern="(?:[A-Fa-f0-9]{2}){0,8}" maxLength={16} /></label>
+      <label>Fingerprint<select name="fingerprint" className={field} defaultValue="chrome">
+        {['chrome', 'firefox', 'safari', 'ios', 'edge'].map(name => <option key={name}>{name}</option>)}
+      </select></label>
+      <label>Flow<select name="flow" className={field} defaultValue="">
+        <option value="">Без flow</option>
+        <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+      </select></label>
+    </> : <label>SHA-256 сертификата (необязательно)<input name="pin" className={field} maxLength={64} /></label>}
+  </div>
+}
+
 function errorMessage(error: unknown) {
   if (isAxiosError(error) && typeof error.response?.data?.detail === 'string') {
     return error.response.data.detail
@@ -51,6 +105,7 @@ const importStatuses = {
   duplicate: 'Дубликат',
   unsupported_protocol: 'Другой протокол или формат',
   incompatible_vless: 'Несовместимый VLESS TCP/TLS или отсутствует IP домена',
+  incompatible_reality: 'Проверьте TCP, IP, SNI, ключ и параметры Reality',
   deployment_conflict: 'Конфликт с параметрами Working Core',
   catalog_full: 'Нет места в каталоге',
 }
@@ -58,7 +113,7 @@ const importStatuses = {
 type SubscriptionPreview = {
   preview_id: string | null
   revision: number
-  results: { line: number; status: keyof typeof importStatuses; name?: string }[]
+  results: { line: number; status: keyof typeof importStatuses; name?: string; security?: VlessSecurity }[]
 }
 
 function SubscriptionImport({ providers, revision, busy, run }: {
@@ -122,7 +177,7 @@ function SubscriptionImport({ providers, revision, busy, run }: {
       <p role="status">К добавлению: {ready}. Пропущено: {preview.results.length - ready}.</p>
       <ul className="max-h-56 overflow-y-auto text-sm text-gray-300">
         {preview.results.map(item => <li key={item.line}>
-          Строка {item.line} · {importStatuses[item.status]}{item.name && ` · ${item.name}`}
+          Строка {item.line} · {importStatuses[item.status]}{item.name && ` · ${item.name} · ${securityLabel(item.security)}`}
         </li>)}
       </ul>
       {revision !== preview.revision && <p className="text-sm text-amber-400">Черновик изменился. Сделайте предпросмотр ещё раз.</p>}
@@ -148,6 +203,7 @@ export function WorkingCore() {
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(true)
+  const [savedManual, setSavedManual] = useState(false)
   const [diff, setDiff] = useState<DraftDiff | null>(null)
   const [changePassword, setChangePassword] = useState(false)
 
@@ -174,13 +230,7 @@ export function WorkingCore() {
       if (importing) {
         await http.post('/core/egress/import', { uri: value(body, 'uri'), dial_address: value(body, 'address') || null })
       } else {
-        await http.put('/core/egress', {
-          address: value(body, 'address'),
-          port: Number(value(body, 'port')),
-          server_name: value(body, 'server_name'),
-          client_id: value(body, 'client_id'),
-          certificate_sha256: value(body, 'pin') || null,
-        })
+        await http.put('/core/egress', manualVless(body))
       }
       form.reset()
       return 'Выход сохранён в черновике.'
@@ -219,7 +269,9 @@ export function WorkingCore() {
       await http.post('/core/egresses', {
         revision: data.revision, name: value(body, 'name'),
         provider_id: value(body, 'provider') || null,
-        uri: { uri: value(body, 'uri'), dial_address: value(body, 'address') || null },
+        ...(savedManual
+          ? { config: manualVless(body) }
+          : { uri: { uri: value(body, 'uri'), dial_address: value(body, 'address') || null } }),
       })
       form.reset()
       return 'Выход сохранён. Выберите его и примените изменения.'
@@ -363,14 +415,21 @@ export function WorkingCore() {
               <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
                 <label>Название<input name="name" className={field} maxLength={64} required /></label>
                 <label>Провайдер<select name="provider" className={field} defaultValue=""><option value="">Без провайдера</option>{data.providers?.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
-                <label>IP выхода (если в ссылке домен)<input name="address" className={field} /></label>
-                <label className="sm:col-span-2">Ссылка VLESS TCP/TLS<input type="password" name="uri" className={field} maxLength={4096} autoComplete="off" required /></label>
+                <label>Способ добавления выхода<select className={field} value={savedManual ? 'manual' : 'uri'}
+                  onChange={event => setSavedManual(event.target.value === 'manual')}>
+                  <option value="uri">Импорт ссылки</option><option value="manual">Ручной ввод</option>
+                </select></label>
+                {savedManual ? <div className="sm:col-span-2"><ManualVlessFields /></div> : <>
+                  <label>IP выхода (если в ссылке домен)<input name="address" className={field} /></label>
+                  <label className="sm:col-span-2">Ссылка VLESS TCP/TLS или Reality<input type="password" name="uri"
+                    className={field} maxLength={4096} autoComplete="off" required /></label>
+                </>}
                 <button className={primary}>Сохранить выход</button>
               </fieldset>
             </form>
             {!!data.saved_egresses?.length && <ul className="divide-y divide-gray-800">
               {data.saved_egresses.map(item => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <span>{item.name}{item.id === data.selected_egress_id ? ' · выбран в черновике' : ''}</span>
+                <span>{item.name} · {securityLabel(item.security)}{item.id === data.selected_egress_id ? ' · выбран в черновике' : ''}</span>
                 <label>Провайдер выхода «{item.name}»<select className={field} value={item.provider_id ?? ''} disabled={busy} onChange={event => {
                   const provider_id = event.target.value || null
                   void run(async () => {
@@ -398,7 +457,7 @@ export function WorkingCore() {
           <div className="grid gap-5 lg:grid-cols-2">
             <section className={panel} aria-labelledby="egress-heading">
               <h2 id="egress-heading" className="text-lg font-semibold">Выход VLESS</h2>
-              <p className="text-sm text-gray-400">{data.vless ? `${data.vless.server_name} · ${data.vless.address} · ${data.vless.port}` : 'Выход ещё не настроен.'}</p>
+              <p className="text-sm text-gray-400">{data.vless ? `${securityLabel(data.vless.security)} · ${data.vless.server_name} · ${data.vless.address} · ${data.vless.port}` : 'Выход ещё не настроен.'}</p>
               <div className="flex flex-wrap gap-2" aria-label="Способ добавления VLESS">
                 <button className={secondary} aria-pressed={importing} onClick={() => setImporting(true)} disabled={busy}>Импорт ссылки</button>
                 <button className={secondary} aria-pressed={!importing} onClick={() => setImporting(false)} disabled={busy}>Ручной ввод</button>
@@ -408,13 +467,7 @@ export function WorkingCore() {
                   {importing ? <>
                     <label className="block">Ссылка VLESS<input type="password" name="uri" className={field} required autoComplete="off" maxLength={4096} /></label>
                     <label className="block">IP выхода (если в ссылке домен)<input name="address" className={field} /></label>
-                  </> : <>
-                    <label className="block">IP выхода<input name="address" className={field} required /></label>
-                    <label className="block">Порт<input name="port" className={field} type="number" defaultValue={443} min={1} max={65535} required /></label>
-                    <label className="block">Имя сервера TLS<input name="server_name" className={field} required /></label>
-                    <label className="block">UUID клиента<input name="client_id" className={field} type="password" autoComplete="off" required /></label>
-                    <label className="block">SHA-256 сертификата (необязательно)<input name="pin" className={field} maxLength={64} /></label>
-                  </>}
+                  </> : <ManualVlessFields />}
                   <button className={primary}>Сохранить выход</button>
                 </fieldset>
               </form>

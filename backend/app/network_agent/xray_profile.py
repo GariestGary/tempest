@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import (
     AfterValidator, Field, IPvAnyAddress, IPvAnyInterface, IPvAnyNetwork,
-    TypeAdapter, ValidationError, model_validator,
+    TypeAdapter, ValidationError, field_validator, model_validator,
 )
 
 from .models import (
@@ -56,7 +56,29 @@ def _check_host_addresses(addresses) -> None:
         raise ValueError("expected one IPv4 /32 and one IPv6 /128 unicast host address")
 
 
-class VlessTLS(ContractModel):
+VlessSecurity = Literal["tls", "reality"]
+
+
+def _reality_public_key(value: str) -> str:
+    key = base64.urlsafe_b64decode(value + "=")
+    if len(key) != 32 or not any(key) or base64.urlsafe_b64encode(key).decode("ascii").rstrip("=") != value:
+        raise ValueError("invalid Reality public key")
+    return value
+
+
+class VlessReality(ContractModel):
+    public_key: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{43}$"), AfterValidator(_reality_public_key)] = Field(repr=False)
+    short_id: Annotated[str, Field(pattern=r"^(?:[A-Fa-f0-9]{2}){0,8}$"), AfterValidator(str.lower)] = Field(default="", repr=False)
+    fingerprint: Literal["chrome", "firefox", "safari", "ios", "edge"] = "chrome"
+    flow: Literal["", "xtls-rprx-vision"] = ""
+
+    @field_validator("fingerprint", mode="before")
+    @classmethod
+    def normalize_fingerprint(cls, value):
+        return value.lower() if isinstance(value, str) else value
+
+
+class VlessEgress(ContractModel):
     address: IPvAnyAddress
     port: Port
     client_id: UUID = Field(repr=False)
@@ -65,6 +87,24 @@ class VlessTLS(ContractModel):
         pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$",
     )
     certificate_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    # Keep the existing TLS representation for old drafts, journals and v1 peers.
+    reality: VlessReality | None = Field(default=None, repr=False, exclude_if=lambda value: value is None)
+
+    @property
+    def security(self) -> VlessSecurity:
+        return "reality" if self.reality is not None else "tls"
+
+    @model_validator(mode="after")
+    def validate_reality(self) -> "VlessEgress":
+        if self.reality is not None:
+            labels = self.server_name.split(".")
+            if self.certificate_sha256 is not None:
+                raise ValueError("a TLS certificate pin cannot be combined with Reality")
+            if len(labels) < 2 or not labels[-1][0].isalpha() or any(len(label) > 63 for label in labels):
+                raise ValueError("Reality requires a DNS server name")
+            if getattr(self.address, "scope_id", None) is not None:
+                raise ValueError("Reality requires an unscoped dial IP")
+        return self
 
 
 class DestinationRule(ContractModel):
@@ -115,7 +155,7 @@ class XrayPlan(GenerationPlan):
     tunnel_addresses: tuple[IPvAnyInterface, IPvAnyInterface]
     private_key: WireGuardKey = Field(repr=False)
     peers: tuple[WireGuardPeer, ...] = Field(max_length=MAX_PEERS)
-    vless: VlessTLS
+    vless: VlessEgress
     resolvers: tuple[IPvAnyAddress, ...] = Field(min_length=1, max_length=2)
     rules: tuple[DestinationRule, ...] = Field(max_length=MAX_RULES)
     probe: ProbePolicy | None = None
@@ -152,10 +192,15 @@ class XrayPlan(GenerationPlan):
         from app.models import Node
 
         upstream = self.vless
+        reality = upstream.reality
         vpn = _outbound_vless(Node(
             name="Xray MVP egress", protocol="vless", address=str(upstream.address),
-            port=upstream.port, transport="tcp", tls="tls", uuid=str(upstream.client_id),
-            sni=upstream.server_name, fingerprint="", pinned_cert_sha256=upstream.certificate_sha256,
+            port=upstream.port, transport="tcp", tls=upstream.security, uuid=str(upstream.client_id),
+            sni=upstream.server_name, pinned_cert_sha256=upstream.certificate_sha256,
+            fingerprint=reality.fingerprint if reality else "",
+            reality_pbk=reality.public_key if reality else None,
+            reality_sid=reality.short_id if reality else None,
+            flow=reality.flow if reality else None,
         ))
         vpn["tag"] = "vpn"
         vpn["streamSettings"].pop("sockopt")

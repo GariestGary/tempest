@@ -13,7 +13,7 @@ from pydantic import Field, IPvAnyAddress, IPvAnyInterface, IPvAnyNetwork, Secre
 from app.core.uri_parser import _parse_vless
 from app.network_agent.models import AgentStatus, ContractModel
 from app.network_agent.xray_profile import (
-    MAX_PEERS, MAX_RULES, DestinationRule, ProbePolicy, VlessTLS, WireGuardKey, WireGuardPeer, XrayPlan,
+    MAX_PEERS, MAX_RULES, DestinationRule, ProbePolicy, VlessEgress, VlessReality, VlessSecurity, WireGuardKey, WireGuardPeer, XrayPlan,
 )
 
 
@@ -45,7 +45,7 @@ class Deployment(ContractModel):
             raise ValueError("address scopes are not supported")
         return self
 
-    def plan(self, draft: "Draft", vless: VlessTLS, status: AgentStatus) -> XrayPlan:
+    def plan(self, draft: "Draft", vless: VlessEgress, status: AgentStatus) -> XrayPlan:
         return XrayPlan(
             generation_id=uuid4(),
             base_generation=status.active_generation,
@@ -128,6 +128,7 @@ class SavedEgress(ContractModel):
     name: ClientName
     encrypted_vless: str = Field(min_length=1, max_length=8192, repr=False)
     provider_id: UUID | None = None
+    security: VlessSecurity = "tls"
 
 
 class Provider(ContractModel):
@@ -145,37 +146,62 @@ class Draft(ContractModel):
     rules: tuple[DestinationRule, ...] = Field(default=(), max_length=MAX_RULES)
 
 
+class VlessImportError(ValueError):
+    def __init__(self, *, reality: bool) -> None:
+        self.status = "incompatible_reality" if reality else "incompatible_vless"
+        super().__init__(
+            "Reality requires TCP/RAW, a dial IP, DNS SNI, a public key and supported short ID, fingerprint and flow."
+            if reality else "Expected VLESS TCP/RAW with TLS or Reality. Supply a dial IP for a hostname."
+        )
+
+
 class VlessImport(ContractModel):
     uri: SecretStr = Field(min_length=1, max_length=4096)
     dial_address: IPvAnyAddress | None = None
 
-    def vless(self) -> VlessTLS:
+    def vless(self) -> VlessEgress:
         uri = self.uri.get_secret_value().strip()
+        security = None
         try:
             parsed = urlsplit(uri)
             pairs = parse_qsl(parsed.query, keep_blank_values=True, max_num_fields=12)
             params = dict(pairs)
+            security = params.get("security")
             if (parsed.scheme != "vless" or not parsed.username or not parsed.hostname
                     or parsed.password is not None or len(pairs) != len(params)):
                 raise ValueError
-            if (params.keys() - {"type", "security", "encryption", "sni", "pcs", "headerType", "fp"}
+            allowed = {"type", "security", "encryption", "sni", "headerType", "fp"}
+            if security == "tls":
+                allowed.add("pcs")
+            elif security == "reality":
+                allowed.update(("pbk", "sid", "flow", "spx"))
+            else:
+                raise ValueError
+            if (params.keys() - allowed
                     or params.get("type", "tcp") not in {"tcp", "raw"}
-                    or params.get("security") != "tls"
                     or params.get("encryption", "none") != "none"
                     or params.get("headerType", "none") != "none"
                     or parsed.path not in {"", "/"}):
                 raise ValueError
+
             node = _parse_vless(uri)
             if "pcs" in params and not node["pinned_cert_sha256"]:
                 raise ValueError
-            return VlessTLS(
+            reality = None
+            if security == "reality":
+                if not params.get("sni") or params.get("spx", "") not in {"", "/"}:
+                    raise ValueError
+                reality = VlessReality(
+                    public_key=node["reality_pbk"], short_id=node["reality_sid"],
+                    fingerprint=node["fingerprint"], flow=node["flow"],
+                )
+            return VlessEgress(
                 address=self.dial_address or node["address"],
                 port=parsed.port if parsed.port is not None else 443,
                 client_id=node["uuid"],
                 server_name=node["sni"],
                 certificate_sha256=node["pinned_cert_sha256"],
+                reality=reality,
             )
         except ValueError:
-            raise ValueError(
-                "Expected VLESS over TCP/TLS. Enter a dial IP for a hostname and use a DNS TLS name."
-            ) from None
+            raise VlessImportError(reality=security == "reality") from None
