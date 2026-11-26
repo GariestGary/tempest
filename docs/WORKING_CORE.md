@@ -2,6 +2,18 @@
 
 Профиль объединяет авторизацию и Web UI PiTun, SQLite и отдельный Xray Agent. Xray 26.10.31 завершает WireGuard в userspace. Панель хранит черновик, Agent хранит активное поколение, подтверждённый LKG и список отзывов. Текущий статус живых испытаний приведён в [STATUS](STATUS.md).
 
+## Состояние прогона 2026-11-26
+
+Реальный пользовательский профиль из UI прошёл WG handshake, TCP/UDP и DNS через TLS; отдельно подтверждён Reality/Vision через WG. Отказы upstream, невалидные UUID/Reality, LKG, restart, reboot и отзыв проверены с ограничениями в [матрице STATUS](STATUS.md#2026-11-26--working-core-live-проверка-к-ревью). Отдельно не подтверждены уже открытые соединения на момент отзыва и клиентский kill-switch.
+
+Панель слушает VM localhost:8787; на TYPHOON используйте `ssh -N -L 127.0.0.1:8787:127.0.0.1:8787 lab`. Учётная запись `admin`; bootstrap-пароль хранится только в `/var/lib/tempest-core-private/bootstrap-password` внутри VM. Приватные ключи, профили, синтетические upstream-конфиги и сырые captures находятся в закрытом `/var/lib/tempest-live-acceptance-20261126` и не входят в Git.
+
+На проверенной VM boot ordering установлен [сценарием](../scripts/lab/working-core-boot-install.sh): topology → sink/upstream/probe → Agent/LKG → Compose, отдельный userspace user peer. Он использует защищённые копии скриптов в `/opt/tempest/bin`, включённые `tempest-lab-*` units и запускается при reboot. Сценарии в `scripts/lab/working-core-*` фиксируют точные имена и UUID VM и отказывают при коллизиях; перед созданием нового стенда сверить UUID, selectors, исходный SHA, свободные пути, recovery и консоль. Bootstrap Agent использует `TEMPEST_LAB_EXPECTED_SHA` для явно проверенного полного SHA checkout. Первичное создание требует operator provisioning fixture, зависимостей и отдельно созданного UI-профиля; boot-сценарий не является универсальным installer.
+
+Штатный Ubuntu-профиль `wg` разрешает тестовые ключи из `/etc/wireguard`; для двух userspace sockets в конкретной VM потребовался согласованный local override. Исходный профиль не менялся, enforcement сохранён. После остановки использующих сокеты lab clients откатить только неизменённый override можно командой `sudo bash /home/gary/working-core-wg-apparmor.sh --rollback`: скрипт сверяет сохранённый исходный профиль и точное содержимое override перед удалением. Agent, Xray и Control Plane дополнительных прав не получили.
+
+Docker внутри VM создаёт собственные bridge/NAT/firewall объекты; их снимки сохранены отдельно от product namespace. Включённый контейнерный профиль и лабораторные systemd units оставлены работающими для ручной проверки. Не восстанавливайте старый QCOW2 поверх текущего журнала без отдельной сверки уже выполненных отзывов.
+
 ## Подготовка согласованной VM
 
 Используйте disposable Ubuntu amd64 с независимой консолью и проверенной копией для восстановления. Сверьте checkout `master`, origin, проверяемый SHA, сетевые пространства и отсутствие коллизий. Для испытаний нужны отдельные namespace gateway и контрольного WireGuard peer, тестовый VLESS TCP/TLS upstream и контролируемые TCP/UDP/DNS назначения. Ниже используется исходная топология A/B. [Топология с точными адресами и интерфейсами](ENGINE_VS_KERNEL_DECISION.md)

@@ -1,5 +1,46 @@
 # TEMPEST — статус форка
 
+## 2026-11-26 · Working Core live-проверка: к ревью
+
+Владелец разрешил точечный local override AppArmor в disposable VM. Штатный `/etc/wireguard` позволил читать тестовые ключи без новых прав; audit отдельно показал отказ доступа к userspace socket. В `/etc/apparmor.d/local/wg` добавлены только чтение `/run/wireguard/` и `rw` для `tpab-wg.sock` и `tpab-user.sock`. Исходный профиль сохранён, не изменён и остаётся `enforce`. Это зависимость данного стенда, а не требование TEMPEST; воспроизводимый контролируемый откат — [скрипт](../scripts/lab/working-core-wg-apparmor.sh).
+
+| Проверка | Результат и границы |
+|---|---|
+| Восстановление | **PASS**: независимая копия recovery QCOW2 загружена без сетевого адаптера при выключенной основной VM; консольный login прошёл. Оригинал сохранил SHA-256. |
+| UI → API → Agent | **PASS**: авторизованный UI создал провайдера, ручные синтетические TLS/Reality с Vision, импортировал подписку с dedup, переключал выходы без apply, создал профиль, показал preview и применил поколения 14 и 15. Созданный через UI профиль подключён в `tpab-w` и прошёл handshake и трафик. |
+| Трафик TLS | **PASS**: DIRECT/VLESS TCP и UDP по IPv4/IPv6; A/AAAA через два resolver-адреса по TCP/UDP (8 комбинаций). Изменение .10 DIRECT → VLESS подтвердило смену источника на sink для обоих протоколов и семейств. |
+| Reality | **PASS**: реальный WG-клиент → Xray → synthetic Reality `xtls-rprx-vision` прошёл те же положительные TCP/UDP и DNS проверки. Отдельная прямая Reality TCP-проба также прошла. |
+| BLOCK и отсутствие утечек | **PASS в стенде**: явный/default BLOCK и чужие DNS/DoT по TCP/UDP и IPv4/IPv6 не достигли sink; на двух sink-интерфейсах отрицательного окна 0 пакетов и 0 потерь захвата. Доступность тех же защищённых назначений проверена положительными прямыми контролями. |
+| Upstream fault и LKG | **PASS**: при остановке только synthetic upstream защищённые пути не достигли sink, captures дали 0 пакетов/0 потерь, прямые контроли и разрешённый DIRECT работали. Неверный UUID и неверный Reality short ID отклонены, прежний LKG возвращён и проверен трафиком. |
+| Restart/reboot/revoke | **PASS**: Agent восстановил LKG после restart и VM reboot. Отзыв отдельного клиента сохранился после restart и reboot: новый handshake, TCP/UDP/DNS не прошли, captures пусты, прямые контроли положительны. Создан новый клиент для ручной проверки. Ранее открытые сессии при отзыве в этом прогоне отдельно не проверены. |
+| Привилегии | **PASS в проверенном runtime**: Agent и Xray в `tpab-g`, не PID 1 netns; все capability masks 0, `NoNewPrivs=1`, TUN у Xray скрыт. API UID 10001/GID 986, все masks 0, `NoNewPrivs=1`, Docker socket не смонтирован. |
+
+Один ранний повтор Reality получил таймауты пользовательского peer сразу после Apply; спустя ограниченное ожидание его повторного handshake вся матрица прошла. При boot verifier сначала не прошёл, затем выполнил 14/14 в рамках штатных повторов. Первый повтор upstream fault после reboot выявил ошибку **лабораторного** boot-ordering: `Requires` на тестовый upstream останавливал Agent и вместе с ним разрешённый DIRECT. Зависимость заменена на `Wants` с сохранением порядка запуска; повтор подтвердил работающий DIRECT, fail-closed и нулевые captures. При перезапуске Xray клиент может кратко переподключаться; это не проверка клиентского kill-switch. Реальный трафик и fail-closed относятся к доставленным в WG пакетам и синтетической топологии, не к клиентским ОС или внешним провайдерам.
+
+Сетевой baseline PID 1 и captures хранятся закрыто в `/var/lib/tempest-live-acceptance-20261126` внутри VM. Docker отдельно создал `docker0`, Compose bridge/veth и собственные IPv4/IPv6 filter/NAT таблицы; ручных глобальных изменений маршрутов, DNS или firewall не делалось. Работающий стенд и boot порядок описаны в [WORKING_CORE](WORKING_CORE.md). После исправления boot-ordering и повторной Reality-проверки TLS LKG поколения 18 и клиент, выданный UI, восстановились после ещё одного reboot и прошли положительную traffic/DNS матрицу. Восстановление старой копии VM после отзывов требует отдельной сверки журнала отзывов. Блок A передаётся на ревью и не объявляется `ACCEPTED`.
+
+Локальные проверки: `quick` 78 passed; targeted Working Core/Reality/Agent 48 passed и один skip без `TEMPEST_TEST_XRAY`. В VM тот же targeted набор с закреплённым Xray — 49 passed без skip. Frontend — 147 passed, lint и build прошли; сохраняется предупреждение о размере chunk. Bash syntax, Python compile и `git diff --check` прошли. Десять пустых negative/fault/revoke PCAP имеют одинаковый SHA-256 `704e5e5b3234433c01fcfd1b20a306e77e985038120492dc53965c3edd38a4ea`; соответствующие tcpdump отчёты подтвердили нулевые потери. Raw данные не публикуются.
+
+## 2026-11-26 · live-приёмка A: незавершённый прогон
+
+Recovery проверен загрузкой отдельной копии QCOW2 в отдельной временной VM без сетевого адаптера: основная VM была выключена, Ubuntu дошла до login, вход через последовательную консоль прошёл. SHA-256 исходной recovery-копии не изменился. Основная VM возвращена в работу. До создания стенда сохранены приватные снимки PID 1; пять изолированных `tpab-*` namespaces созданы с документированными veth, адресами и маршрутами, forwarding выключен. Docker-managed изменения в VM зафиксированы отдельно.
+
+Запущены поставляемые Compose API/panel и системный Xray Agent. Для сборки потребовались временные зеркала Debian/npm и сеть гостя на время сборки; runtime Compose не менялся. Agent работает в `tpab-g`, UID 997/GID 986, все capability masks нулевые, `NoNewPrivs=1`; API UID 10001/GID 986 имеет те же ограничения и не монтирует Docker socket. Через работающий HTTP API и реальный AF_UNIX проверены login, ручной TLS, провайдер и выходы TLS/Reality, preview/dedup/commit подписки, переключение без apply, выдача WG-профиля и preview у Agent. Браузер показал форму входа; авторизованный UI workflow ещё не проверен.
+
+Отдельный synthetic Xray client в `tpab-g` установил настоящий Reality `xtls-rprx-vision` и передал TCP payload через `tpab-u` на sink, который увидел источник `203.0.113.5`. Это не испытание WG-пути или TEMPEST Apply. TLS certificate handshake с синтетическим upstream также прошёл.
+
+**Блокер:** Ubuntu AppArmor `wg` запрещает чтение закрытого лабораторного ключа и доступ к userspace-сокету `wireguard-go`; профиль остался включённым. Автоматическая проверка отклонила добавление точечных правил для этих путей как постоянное расширение доступа. WG probe пока не настроен, Xray ingress не запущен, Apply и вся traffic/fault/reboot/revoke матрица `NOT_RUN`. Компоненты лаборатории и панель оставлены работающими; профиль ручного клиента создан, но не применён. Блок A не завершён и не принят. Скрипты подготовки находятся в `scripts/lab/working-core-*`; полный сценарий и reboot provisioning пока не подтверждены.
+
+## 2026-11-26 · восстановление лаборатории TYPHOON
+
+Создана disposable `tempest-lab-ubuntu` на Ubuntu 26.04.1 cloud image в `qemu:///session`: KVM, 4 vCPU, 8 GiB RAM, отдельный QCOW2 50 GiB, passt без bridge и SSH только на `127.0.0.1:2222`. `ssh lab` использует отдельный ключ и закреплённый ключ сервера. После перезапуска VM и SSH работают. Графическая консоль показала приглашение входа; последовательная консоль проверена отдельно. Пароль консоли и sudo хранится в закрытом файле `~/.local/share/libvirt/images/tempest-lab/console-password`; sudo требует пароль.
+
+В VM установлены Docker 29.1.3, Compose 2.40.3, WireGuard tools, Python 3.11.18, uv 0.13.10, Node 20.20.0, зависимости проекта и Xray 26.10.31 с проверенным SHA-256 `cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1`. Docker и его socket отключены и не запускались. На TYPHOON восстановлены Python 3.11.18, uv 0.13.10, Node 20.20.0 и проектные зависимости. Оба checkout на `d98ec3da94469c784f8aaa46401e5f36258bdd0d`; remote `upstream` восстановлен.
+
+Холодная копия выключенной VM и XML находятся в `~/.local/share/libvirt/images/tempest-lab/recovery-20261126/`. `qemu-img check` для исходного и копии, `qemu-img compare` и SHA-256 прошли. Копия на том же физическом диске; загрузка из копии не проверялась. На TYPHOON и VM прошли quick backend (78 тестов) и Working Core/Reality (29 тестов); frontend на TYPHOON — 147 тестов, lint и build. [CI](https://github.com/GariestGary/tempest/actions/runs/44813470945) и [CodeQL](https://github.com/GariestGary/tempest/actions/runs/44813471039) для этого SHA успешны.
+
+Подготовка стенда не является live-приёмкой: namespaces, services и реальный трафик Working Core не запускались. До эксперимента отдельно сверить namespace identity, recovery и консоль и согласовать точную тестовую топологию и операции. TYPHOON host network и VORTEX не изменялись.
+
 ## 2026-11-20 · каталог провайдеров Working Core
 
 Добавлены именованные провайдеры как группы сохранённых VLESS TCP/TLS выходов: создание, переименование, удаление пустого провайдера и перенос выходов, включая созданные ранее. Данные хранятся в прежнем черновике; отсутствие полей в старых данных допустимо. Операции используют проверку ревизии под блокировкой процесса. Шифрование VLESS и процедура preview/apply не изменены; выбор выхода не применяет конфигурацию. Один выбранный выход остаётся общим для VPN-правил и DNS. Подписки, другие протоколы, health/failover и независимая маршрутизация по выходам не реализованы.
