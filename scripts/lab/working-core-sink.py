@@ -50,8 +50,9 @@ async def tcp(reader, writer, dns):
             if reply:
                 writer.write(struct.pack('!H', len(reply)) + reply)
         else:
-            data = await asyncio.wait_for(reader.readline(), 3)
-            writer.write(data + peer[0].encode() + b'\n')
+            while data := await asyncio.wait_for(reader.readline(), 60):
+                writer.write(data + peer[0].encode() + b'\n')
+                await writer.drain()
         await writer.drain()
         print('tcp', writer.get_extra_info('sockname'), peer[0], flush=True)
     except (OSError, ValueError, asyncio.TimeoutError, asyncio.IncompleteReadError):
