@@ -26,11 +26,19 @@ class Snapshot(ContractModel):
 
     @classmethod
     def create(cls, plan: XrayPlan) -> "Snapshot":
-        return cls(plan=plan, fingerprint=hashlib.sha256(plan.config_bytes()).hexdigest())
+        return cls(plan=plan, fingerprint=cls._fingerprint(plan))
+
+    @staticmethod
+    def _fingerprint(plan: XrayPlan) -> str:
+        data = plan.config_bytes()
+        bridge = plan.awg_bridge()
+        if bridge is not None:
+            data += b'\0AWG\0' + bridge.payload
+        return hashlib.sha256(data).hexdigest()
 
     def payload(self) -> bytes:
         data = self.plan.config_bytes()
-        if hashlib.sha256(data).hexdigest() != self.fingerprint:
+        if self._fingerprint(self.plan) != self.fingerprint:
             raise ValueError("stored Xray configuration fingerprint cannot be reproduced")
         return data
 
@@ -94,6 +102,8 @@ class XrayAgent:
         self._active: Snapshot | None = None
         self._invocation: str | None = None
         self._verified = False
+        self._egress_probe_ok: bool | None = None
+        self._egress_checked_ms: int | None = None
         self._deadline = 0.0
         self._deadline_epoch_ms: int | None = None
         self._last_error: str | None = None
@@ -115,6 +125,8 @@ class XrayAgent:
         self._active = None
         self._invocation = None
         self._verified = False
+        self._egress_probe_ok = None
+        self._egress_checked_ms = None
 
     def _close(self, reason: str) -> None:
         self._last_error = reason
@@ -149,8 +161,15 @@ class XrayAgent:
 
     def _activate(self, snapshot: Snapshot) -> None:
         payload = self._runtime_payload(snapshot)
+        bridge = snapshot.plan.awg_bridge()
+        if payload is not None and bridge is not None:
+            self._runtime.activate_awg(bridge.payload)
         invocation = self._runtime.activate(payload)
         self._runtime.verify(payload, invocation)
+        if payload is not None and bridge is not None:
+            self._runtime.assert_awg(bridge.payload)
+            self._egress_probe_ok = True
+            self._egress_checked_ms = time.time_ns() // 1_000_000
         self._active = snapshot
         self._invocation = invocation
         self._last_error = None
@@ -164,7 +183,7 @@ class XrayAgent:
                 self._last_error = "confirmed configuration contains a revoked peer; ingress is closed"
             return
         try:
-            self._runtime.validate(lkg.payload())
+            self._validate(lkg)
             self._activate(lkg)
         except (OSError, ValueError, XrayRuntimeError):
             self._close("confirmed configuration could not be restored; ingress is closed")
@@ -173,8 +192,16 @@ class XrayAgent:
         active = self._active.plan if self._active else None
         pending = self._record.pending
         lkg = self._safe_lkg()
+        egress_state = None
+        if active is not None and active.awg_config is not None:
+            try:
+                self._runtime.assert_awg(active.awg_bridge().payload)
+                egress_state = ("active_unverified" if self._egress_probe_ok is None else
+                                "active_verified" if self._egress_probe_ok else "unavailable")
+            except (OSError, ValueError, XrayRuntimeError):
+                egress_state = "unavailable"
         return AgentStatus(
-            state="degraded" if self._last_error else "pending_confirmation" if pending else "idle",
+            state="degraded" if self._last_error or egress_state == "unavailable" else "pending_confirmation" if pending else "idle",
             active_generation=active.generation if active else 0,
             active_generation_id=active.generation_id if active else None,
             last_known_good_generation=lkg.plan.generation if lkg else 0,
@@ -182,6 +209,9 @@ class XrayAgent:
             confirmation_deadline_epoch_ms=self._deadline_epoch_ms if pending and active else None,
             last_error=self._last_error,
             generation_watermark=self._record.high_water,
+            active_egress_id=active.egress_id if active else None,
+            egress_state=egress_state,
+            egress_checked_epoch_ms=self._egress_checked_ms if egress_state is not None else None,
         )
 
     def _candidate(self, plan: XrayPlan) -> Snapshot:
@@ -196,14 +226,20 @@ class XrayAgent:
             raise ProfileConflict("candidate restores a revoked WireGuard peer")
         return candidate
 
+    def _validate(self, snapshot: Snapshot) -> None:
+        self._runtime.validate(snapshot.payload())
+        bridge = snapshot.plan.awg_bridge()
+        if bridge is not None:
+            self._runtime.validate_awg(bridge.payload)
+
     def _diff(self, candidate: Snapshot) -> NetworkDiff:
         plan = candidate.plan
         old = self._active.plan if self._active else None
         fields = {
             "wireguard": ("tunnel_addresses", "private_key", "peers", "probe"),
-            "vless": ("vless",),
+            "vless": ("vless", "awg_config", "egress_id"),
             "dns": ("resolvers",),
-            "destination-policy": ("rules",),
+            "destination-policy": ("rules", "default_egress"),
         }
         return NetworkDiff(
             generation_id=plan.generation_id, target_generation=plan.generation,
@@ -222,7 +258,7 @@ class XrayAgent:
             raise ProfileConflict("apply requires a staged generation")
         candidate = self._candidate(self._staged.plan)
         try:
-            self._runtime.validate(candidate.payload())
+            self._validate(candidate)
         except XrayRuntimeError:
             raise ProfileConflict("Xray rejected the configuration before apply") from None
         lkg = self._record.lkg
@@ -264,6 +300,9 @@ class XrayAgent:
         if method == "verify" or (method == "confirm" and pending is not None):
             self._verified = False
             self._runtime.verify(self._runtime_payload(self._active), self._invocation)
+            bridge = self._active.plan.awg_bridge()
+            if bridge is not None and self._runtime_payload(self._active) is not None:
+                self._runtime.assert_awg(bridge.payload)
         else:
             self._runtime.assert_current(self._runtime_payload(self._active), self._invocation)
         self.maintain()
@@ -302,7 +341,7 @@ class XrayAgent:
             "revoked": revoked, "high_water": generation, "last_attempt_id": request.request_id,
         }))
         try:
-            self._runtime.validate(candidate.payload())
+            self._validate(candidate)
             self._activate(candidate)
         except (OSError, ValueError, XrayRuntimeError):
             self._close("peer revoked; remaining ingress could not be restored")
@@ -330,11 +369,27 @@ class XrayAgent:
                 result = self._status()
             elif self._journal_failed:
                 raise ProfileConflict("journal unavailable; ingress is closed")
+            elif request.method == "probe_egress":
+                if self._active is None or self._active.plan.awg_config is None or self._record.pending is not None:
+                    raise ProfileConflict("AWG probe requires a confirmed active AWG generation")
+                payload = self._runtime_payload(self._active)
+                if payload is None:
+                    raise ProfileConflict("AWG probe requires an active ingress")
+                try:
+                    self._runtime.verify(payload, self._invocation)
+                    self._runtime.assert_awg(self._active.plan.awg_bridge().payload)
+                    self._egress_probe_ok = True
+                except (OSError, ValueError, XrayRuntimeError):
+                    # A failed egress must not close explicit DIRECT paths.
+                    self._runtime.assert_current(payload, self._invocation)
+                    self._egress_probe_ok = False
+                self._egress_checked_ms = time.time_ns() // 1_000_000
+                result = self._status()
             elif isinstance(request, XrayPlanRequest):
                 candidate = self._candidate(request.plan)
                 if request.method in {"stage", "validate"}:
                     try:
-                        self._runtime.validate(candidate.payload())
+                        self._validate(candidate)
                     except XrayRuntimeError:
                         raise ProfileConflict("Xray rejected the configuration before apply") from None
                 if request.method == "stage":

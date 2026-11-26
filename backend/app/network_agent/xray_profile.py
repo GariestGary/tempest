@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import hashlib
 from ipaddress import IPv6Network
 from typing import Annotated, Literal
 from uuid import UUID
@@ -20,6 +21,7 @@ INBOUND = "wg-mvp"
 DNS_PORTS = (53, 853)
 MAX_PEERS = 32
 MAX_RULES = 32
+AWG_SOCKS_PORT = 18877
 MAPPED_IPV6 = IPv6Network("::ffff:0:0/96")
 Port = Annotated[int, Field(strict=True, ge=1, le=65535)]
 
@@ -149,13 +151,15 @@ class XrayPlan(GenerationPlan):
 
     schema_version: Literal[1]
     target_namespace_id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")
-    default_egress: Literal["block"]
+    default_egress: Literal["block", "vpn"]
     listen_address: IPvAnyAddress
     listen_port: Annotated[int, Field(strict=True, ge=1024, le=65535)]
     tunnel_addresses: tuple[IPvAnyInterface, IPvAnyInterface]
     private_key: WireGuardKey = Field(repr=False)
     peers: tuple[WireGuardPeer, ...] = Field(max_length=MAX_PEERS)
-    vless: VlessEgress
+    vless: VlessEgress | None = None
+    awg_config: str | None = Field(default=None, min_length=1, max_length=24576, repr=False, exclude_if=lambda value: value is None)
+    egress_id: UUID | None = Field(default=None, exclude_if=lambda value: value is None)
     resolvers: tuple[IPvAnyAddress, ...] = Field(min_length=1, max_length=2)
     rules: tuple[DestinationRule, ...] = Field(max_length=MAX_RULES)
     probe: ProbePolicy | None = None
@@ -163,6 +167,10 @@ class XrayPlan(GenerationPlan):
 
     @model_validator(mode="after")
     def validate_policy(self) -> "XrayPlan":
+        if (self.vless is None) == (self.awg_config is None):
+            raise ValueError("exactly one VPN egress is required")
+        if self.awg_config is not None:
+            self.awg_bridge()
         _check_host_addresses(self.tunnel_addresses)
         peers = self.runtime_peers()
         keys = [peer.public_key for peer in peers]
@@ -171,11 +179,11 @@ class XrayPlan(GenerationPlan):
             raise ValueError("duplicate WireGuard peer key or address")
         if set(addresses).intersection(address.ip for address in self.tunnel_addresses):
             raise ValueError("peer address collides with the server address")
-        endpoints = (self.listen_address, self.vless.address, *self.resolvers)
+        endpoints = (self.listen_address, *([self.vless.address] if self.vless else []), *self.resolvers)
         if any(addr.is_unspecified or addr.is_loopback or addr.is_multicast or addr.is_link_local
                or getattr(addr, "ipv4_mapped", None) is not None for addr in endpoints):
             raise ValueError("listener, upstream and resolver addresses must be explicit unicast")
-        if self.vless.address == self.listen_address or self.listen_address in self.resolvers:
+        if (self.vless and self.vless.address == self.listen_address) or self.listen_address in self.resolvers:
             raise ValueError("listener cannot be an egress destination")
         if len({address.version for address in self.resolvers}) != len(self.resolvers):
             raise ValueError("only one resolver per IP family is supported")
@@ -185,6 +193,13 @@ class XrayPlan(GenerationPlan):
     def runtime_peers(self) -> tuple[WireGuardPeer, ...]:
         return self.peers + (self.probe.peer,) if self.probe else self.peers
 
+    def awg_bridge(self):
+        from app.core.awg_bridge import build_awg_bridge_config
+        if self.awg_config is None:
+            return None
+        password = hashlib.sha256((str(self.generation_id) + self.awg_config).encode()).hexdigest()
+        return build_awg_bridge_config(self.awg_config, socks_port=AWG_SOCKS_PORT, socks_password=password)
+
     def config_bytes(self) -> bytes:
         import json
 
@@ -192,21 +207,37 @@ class XrayPlan(GenerationPlan):
         from app.models import Node
 
         upstream = self.vless
-        reality = upstream.reality
-        vpn = _outbound_vless(Node(
-            name="Xray MVP egress", protocol="vless", address=str(upstream.address),
-            port=upstream.port, transport="tcp", tls=upstream.security, uuid=str(upstream.client_id),
-            sni=upstream.server_name, pinned_cert_sha256=upstream.certificate_sha256,
-            fingerprint=reality.fingerprint if reality else "",
-            reality_pbk=reality.public_key if reality else None,
-            reality_sid=reality.short_id if reality else None,
-            flow=reality.flow if reality else None,
-        ))
-        vpn["tag"] = "vpn"
-        vpn["streamSettings"].pop("sockopt")
-        vpn["streamSettings"]["network"] = "raw"
-        if upstream.certificate_sha256 is not None:
-            vpn["streamSettings"]["tlsSettings"]["verifyPeerCertByName"] = upstream.server_name
+        reality = upstream.reality if upstream else None
+        if upstream:
+            vpn = _outbound_vless(Node(
+                name="Xray MVP egress", protocol="vless", address=str(upstream.address),
+                port=upstream.port, transport="tcp", tls=upstream.security, uuid=str(upstream.client_id),
+                sni=upstream.server_name, pinned_cert_sha256=upstream.certificate_sha256,
+                fingerprint=reality.fingerprint if reality else "",
+                reality_pbk=reality.public_key if reality else None,
+                reality_sid=reality.short_id if reality else None,
+                flow=reality.flow if reality else None,
+            ))
+            vpn["tag"] = "vpn"
+            vpn["streamSettings"].pop("sockopt")
+            vpn["streamSettings"]["network"] = "raw"
+            if upstream.certificate_sha256 is not None:
+                vpn["streamSettings"]["tlsSettings"]["verifyPeerCertByName"] = upstream.server_name
+        else:
+            password = hashlib.sha256((str(self.generation_id) + self.awg_config).encode()).hexdigest()
+            vpn = {"protocol": "socks", "tag": "vpn", "settings": {"servers": [{
+                "address": "127.0.0.1", "port": AWG_SOCKS_PORT,
+                "users": [{"user": "tempest", "pass": password}],
+            }]}}
+        bridge = self.awg_bridge()
+        ipv4_only = bridge is not None and not bridge.ipv6
+        if bridge is None:
+            dns_outbound = []
+        else:
+            dns_outbound = [{"protocol": "dns", "tag": "vpn-dns",
+                             "settings": {"rewriteAddress": bridge.resolver_ipv4, "rewriteNetwork": "udp",
+                                          "rules": [{"action": "direct"}]},
+                             "streamSettings": {"sockopt": {"dialerProxy": "vpn"}}}]
 
         def match(egress: str, **conditions) -> dict:
             return dict(conditions, type="field", inboundTag=[INBOUND], outboundTag=egress)
@@ -214,11 +245,22 @@ class XrayPlan(GenerationPlan):
         def destination(rule: DestinationRule) -> dict:
             return {"ip": [str(rule.destination)], "port": str(rule.port), "network": "tcp,udp"}
 
+        def rule_egress(rule: DestinationRule) -> str:
+            if ipv4_only and rule.egress == "vpn" and rule.destination.version == 6:
+                return "block"
+            return rule.egress
+
+        dns_routes = (
+            [match("block" if ipv4_only and address.version == 6 else "vpn-dns", ip=[str(address)], port="53", network="tcp,udp")
+             for address in self.resolvers]
+            if bridge is not None else
+            [match("vpn", ip=[str(address) for address in self.resolvers], port="53", network="tcp,udp")]
+        )
         probe_rules = self.probe.rules if self.probe else ()
         probe_routes = []
         if self.probe:
             source = [str(address) for address in self.probe.peer.addresses]
-            probe_routes = [match(rule.egress, sourceIP=source, **destination(rule)) for rule in probe_rules]
+            probe_routes = [match(rule_egress(rule), sourceIP=source, **destination(rule)) for rule in probe_rules]
             probe_routes.append(match("block", sourceIP=source))
 
         return (json.dumps({
@@ -242,13 +284,15 @@ class XrayPlan(GenerationPlan):
                     for rule in (*self.rules, *probe_rules) if rule.egress == "direct"
                 ]}},
                 vpn,
+                *dns_outbound,
             ],
             "routing": {"domainStrategy": "AsIs", "rules": [
-                match("vpn", ip=[str(address) for address in self.resolvers], port="53", network="tcp,udp"),
+                *dns_routes,
                 match("block", port="53,853"),
                 *probe_routes,
-                *(match(rule.egress, **destination(rule)) for rule in self.rules),
-                match("block"),
+                *(match(rule_egress(rule), **destination(rule)) for rule in self.rules),
+                *([match("block", ip=["::/0"])] if ipv4_only and self.default_egress == "vpn" else []),
+                match(self.default_egress),
             ]},
         }, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
@@ -273,9 +317,15 @@ class XrayRecoverRequest(ContractModel):
     method: Literal["recover_lkg"]
 
 
+class XrayProbeRequest(ContractModel):
+    protocol_version: Literal[1]
+    request_id: UUID
+    method: Literal["probe_egress"]
+
+
 XrayRequest = Annotated[
     XrayPlanRequest | XrayRevokeRequest | ApplyRequest | VerifyRequest | ConfirmRequest | RollbackRequest
-    | ReadStatusRequest | XrayRecoverRequest,
+    | ReadStatusRequest | XrayRecoverRequest | XrayProbeRequest,
     Field(discriminator="method"),
 ]
 _REQUEST = TypeAdapter(XrayRequest)

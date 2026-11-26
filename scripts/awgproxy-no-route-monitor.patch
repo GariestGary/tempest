@@ -1,0 +1,23 @@
+--- a/wireguard.go
++++ b/wireguard.go
+@@ -14,6 +14,11 @@
+ 	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
+ )
+ 
++// The isolated TEMPEST endpoint uses a fixed provisioned route.  Wrapping the
++// upstream bind avoids its optional Linux route listener (AF_NETLINK); packet
++// transport, cryptography and the upstream bind itself remain unchanged.
++type isolatedBind struct{ conn.Bind }
++
+ // DeviceSetting contains the parameters for setting up a tun interface
+ type DeviceSetting struct {
+ 	IpcRequest string
+@@ -197,7 +202,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	dev := device.NewDevice(tun, conn.NewDefaultBind(), device.NewLogger(logLevel, ""))
++	dev := device.NewDevice(tun, isolatedBind{conn.NewDefaultBind()}, device.NewLogger(logLevel, ""))
+ 	err = dev.IpcSet(setting.IpcRequest)
+ 	if err != nil {
+ 		dev.Close()

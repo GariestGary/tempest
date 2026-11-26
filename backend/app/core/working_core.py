@@ -2,7 +2,7 @@
 
 import base64
 from itertools import islice
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID, uuid4
 
@@ -45,7 +45,7 @@ class Deployment(ContractModel):
             raise ValueError("address scopes are not supported")
         return self
 
-    def plan(self, draft: "Draft", vless: VlessEgress, status: AgentStatus) -> XrayPlan:
+    def plan(self, draft: "Draft", vless: VlessEgress | None, status: AgentStatus, *, awg_config: str | None = None) -> XrayPlan:
         return XrayPlan(
             generation_id=uuid4(),
             base_generation=status.active_generation,
@@ -54,12 +54,14 @@ class Deployment(ContractModel):
             target_namespace_id=self.target_namespace_id,
             listen_address=self.listen_address,
             listen_port=self.listen_port,
-            default_egress="block",
+            default_egress=draft.default_egress,
             tunnel_addresses=self.tunnel_addresses,
             private_key=self.private_key,
             peers=tuple(client.peer for client in draft.clients),
             probe=self.probe,
             vless=vless,
+            awg_config=awg_config,
+            egress_id=draft.selected_egress_id,
             resolvers=self.resolvers,
             rules=draft.rules,
             confirmation_timeout_seconds=180,
@@ -131,6 +133,13 @@ class SavedEgress(ContractModel):
     security: VlessSecurity = "tls"
 
 
+class SavedAwgEgress(ContractModel):
+    id: UUID
+    name: ClientName
+    provider_id: UUID | None = None
+    encrypted_config: str = Field(min_length=1, max_length=65536, repr=False)
+
+
 class Provider(ContractModel):
     id: UUID
     name: ClientName
@@ -140,10 +149,12 @@ class Draft(ContractModel):
     revision: int = Field(default=0, ge=0)
     encrypted_vless: str | None = Field(default=None, repr=False)
     saved_egresses: tuple[SavedEgress, ...] = Field(default=(), max_length=MAX_SAVED_EGRESSES)
+    saved_awg_egresses: tuple[SavedAwgEgress, ...] = Field(default=(), max_length=MAX_SAVED_EGRESSES)
     providers: tuple[Provider, ...] = Field(default=(), max_length=64)
     selected_egress_id: UUID | None = None
     clients: tuple[Client, ...] = Field(default=(), max_length=MAX_PEERS)
     rules: tuple[DestinationRule, ...] = Field(default=(), max_length=MAX_RULES)
+    default_egress: Literal["block", "vpn"] = "block"
 
 
 class VlessImportError(ValueError):

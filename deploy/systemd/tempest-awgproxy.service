@@ -1,0 +1,28 @@
+[Unit]
+Description=TEMPEST AmneziaWG egress bridge
+BindsTo=tempest-xray-agent.service
+After=tempest-xray-agent.service
+AssertPathIsMountPoint=/run/netns/tempest-ns-xray
+
+[Service]
+Type=exec
+User=tempest-awgproxy
+Group=tempest-xray
+NetworkNamespacePath=/run/netns/tempest-ns-xray
+ExecStart=/opt/tempest/bin/awgproxy -s -c /run/tempest-xray/active-awg.conf
+StandardOutput=null
+StandardError=null
+Restart=no
+TimeoutStopSec=3s
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

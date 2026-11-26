@@ -154,3 +154,56 @@ async def test_subscription_preview_commit_is_append_only_and_revision_bound(cat
     assert len(draft.saved_egresses) == 2
     assert working_core._decrypt_vless(draft.saved_egresses[1].encrypted_vless).client_id.hex == new_id.replace('-', '')
     assert all(secret not in row.value for secret in secrets[:-1])
+
+
+@pytest.mark.asyncio
+async def test_awg_import_is_encrypted_and_can_be_selected(catalog_http, session):
+    http = catalog_http
+    await authenticate(http)
+    provider = (await http.post('/api/core/providers', json={'revision': 0, 'name': 'AWG provider'})).json()
+    private = base64.b64encode(b'\x01' * 32).decode()
+    preshared = base64.b64encode(b'\x02' * 32).decode()
+    config = (f'[Interface]\nPrivateKey = {private}\nAddress = 10.0.0.2/32\nDNS = 1.1.1.1\n'
+              f'Jc = 4\n[Peer]\nPublicKey = {private}\n'
+              f'PresharedKey = {preshared}\nEndpoint = 192.0.2.123:1234\n'
+              'AllowedIPs = 0.0.0.0/0\n')
+    payload = {'revision': 1, 'name': 'AWG', 'provider_id': provider['id'], 'config': config}
+    preview = await http.post('/api/core/awg-egresses/preview', json={'config': config})
+    assert preview.status_code == 200
+    assert preview.json() == {'ipv6_configured': False}
+    assert preview.headers['Cache-Control'] == 'no-store'
+    assert private not in preview.text and preshared not in preview.text
+    assert (await http.get('/api/core')).json()['revision'] == 1
+    imported = await http.post('/api/core/awg-egresses', json=payload)
+    assert imported.status_code == 201
+    exit_id = imported.json()['id']
+    state = await http.get('/api/core')
+    assert state.json()['saved_awg_egresses'][0]['id'] == exit_id
+    session.expire_all()
+    stored = session.exec(select(Settings).where(Settings.key == working_core._DRAFT_KEY)).one().value
+    for secret in (private, preshared, '192.0.2.123'):
+        assert secret not in stored and secret not in state.text and secret not in imported.text
+    assert (await http.post(f'/api/core/egresses/{exit_id}/select', json={'revision': 2})).status_code == 404
+    assert (await http.request('DELETE', f"/api/core/providers/{provider['id']}", json={'revision': 2})).status_code == 409
+    assert (await http.post(f'/api/core/awg-egresses/{exit_id}/select', json={'revision': 1})).status_code == 409
+    assert (await http.post(f'/api/core/awg-egresses/{exit_id}/select', json={'revision': 2})).status_code == 204
+    selected = (await http.get('/api/core')).json()
+    assert selected['selected_egress_id'] == exit_id
+    assert (await http.request('DELETE', f'/api/core/awg-egresses/{exit_id}', json={'revision': 3})).status_code == 409
+    assert (await http.put('/api/core/rules', json={'revision': 3, 'rules': [], 'default_egress': 'vpn'})).status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_awg_import_rejects_malformed_structure_without_echoing_secrets(catalog_http):
+    http = catalog_http
+    await authenticate(http)
+    preview = await http.post('/api/core/awg-egresses/preview', json={'config': '[Interface]\nPrivateKey = secret-value\n[Peer]\n'})
+    assert preview.status_code == 422
+    assert preview.headers['Cache-Control'] == 'no-store'
+    assert 'secret-value' not in preview.text
+    response = await http.post('/api/core/awg-egresses', json={
+        'revision': 0, 'name': 'Invalid', 'config': '[Interface]\nPrivateKey = secret-value\n[Peer]\n',
+    })
+    assert response.status_code == 422
+    assert 'secret-value' not in response.text
+    assert (await http.get('/api/core')).json()['revision'] == 0

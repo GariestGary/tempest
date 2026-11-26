@@ -11,7 +11,7 @@ from .client import NetworkAgentClient, NetworkAgentRejected, NetworkAgentUnavai
 from .models import (
     MAX_IPC_MESSAGE_BYTES, ApplyRequest, ConfirmRequest, ReadStatusRequest, RollbackRequest, VerifyRequest,
 )
-from .xray_profile import XrayPlan, XrayPlanRequest, XrayRecoverRequest, XrayRevokeRequest
+from .xray_profile import XrayPlan, XrayPlanRequest, XrayProbeRequest, XrayRecoverRequest, XrayRevokeRequest
 
 DEFAULT_SOCKET = "/run/tempest-xray-agent/control.sock"
 
@@ -30,6 +30,8 @@ class XrayAgentClient(NetworkAgentClient):
             request = ReadStatusRequest(**fields)
         elif method == "recover_lkg":
             request = XrayRecoverRequest(protocol_version=1, **fields)
+        elif method == "probe_egress":
+            request = XrayProbeRequest(protocol_version=1, **fields)
         else:
             request_type = {
                 "apply": ApplyRequest, "verify": VerifyRequest,
@@ -59,7 +61,7 @@ def main() -> None:
             if len(contents) > MAX_IPC_MESSAGE_BYTES:
                 parser.error("Xray profile exceeds the frame limit")
             plan = XrayPlan.model_validate_json(contents)
-        client = XrayAgentClient(args.socket, timeout=65.0)
+        client = XrayAgentClient(args.socket, timeout=120.0)
         result = asyncio.run(client.request(args.method, plan=plan, generation_id=getattr(args, "generation_id", None)))
     except (OSError, ValidationError):
         parser.error("Xray profile could not be read or validated")

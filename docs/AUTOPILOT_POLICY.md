@@ -2,7 +2,7 @@
 
 ## Development feedback loop
 
-- TORNADO is the primary development environment. Run targeted Windows pytest as the fast edit/test cycle. At an explicit reviewed commit, `scripts/remote-check.ps1` may run selected safe Linux pytest on VORTEX through SSH. GitHub CI independently runs the complete checks after an authorized push. Real network experiments belong only in a disposable isolated Linux VM.
+- Use the active development environment and its native targeted pytest as the fast edit/test cycle. At an explicit reviewed commit, `scripts/remote-check.ps1` may run selected safe Linux pytest on VORTEX through SSH. GitHub CI independently runs the complete checks after an authorized push. Real network experiments belong only in a disposable isolated Linux VM.
 - The VORTEX runner must verify SSH, available resources, clean `master`, expected `origin`, exact commit SHA, and the project Python 3.11 venv before testing. Use only allowlisted tests, temporary directories, `nice`, and a timeout; report passed/failed/skipped and SHA. Connectivity or resource failure ends before any repository update.
 
 - **TARGETED LOCAL FEEDBACK POLICY:** run only tests for changed modules or behavior after each code change. Targeted pytest uses `-x` and stops at the first failure. Do not repeat full backend pytest for small edits.
@@ -20,4 +20,5 @@
 - Local scripts do not install dependencies, require `sudo`, start containers, or change system settings.
 - Docker runtime smoke and real network integration are allowed only in a pre-approved isolated Linux VM/test host. Never run privileged Network Agent or network integration tests on TYPHOON or VORTEX; never touch VORTEX services without separate authorization.
 - Before risky system changes, privileged operations, or system service changes, stop and ask the owner.
-- Do not begin a later TEMPEST task or phase without owner authorization, even if the local workflow is ready.
+- Continue autonomously through the ordered product priorities: implement, verify the necessary user journey, fix defects, and proceed. Do not introduce new gates or repeat successful tests without a relevant change. Keep noncritical debt in the compact list in PROJECT_SPEC §15, with a reason and closure condition.
+- A is ACCEPTED_WITH_LIMITATIONS at `93feeab084e2a66e1371e7f503baede6d1f32c6d`. Combine external-client and UDP ingress checks with the first practical device connection; no second VM solely for formal acceptance. Prepare practical deployment as capabilities become ready. Production deployment, risky system changes and changes to VORTEX or TYPHOON network configuration still require separate authorization.

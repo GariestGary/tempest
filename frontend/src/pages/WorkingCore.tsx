@@ -10,6 +10,9 @@ type Agent = {
   last_known_good_generation: number
   pending_generation_id: string | null
   last_error: string | null
+  active_egress_id?: string | null
+  egress_state?: 'active_unverified' | 'active_verified' | 'unavailable' | null
+  egress_checked_epoch_ms?: number | null
 }
 type VlessSecurity = 'tls' | 'reality'
 type Provider = { id: string; name: string }
@@ -17,19 +20,21 @@ type Gateway = {
   revision: number
   providers: Provider[]
   saved_egresses: { id: string; name: string; provider_id: string | null; security?: VlessSecurity }[]
+  saved_awg_egresses: { id: string; name: string; provider_id: string | null }[]
   selected_egress_id: string | null
   vless: { address: string; port: number; server_name: string; security?: VlessSecurity } | null
   clients: { id: string; name: string; addresses: string[] }[]
   rules: Rule[]
+  default_egress: 'block' | 'vpn'
   resolvers: string[]
   agent: Agent | null
   agent_error: string | null
 }
 type DraftDiff = { revision: number; base_generation: number; sections: string[] }
 
-const actions: Record<Action, string> = { direct: 'DIRECT', vpn: 'VLESS', block: 'BLOCK' }
+const actions: Record<Action, string> = { direct: 'DIRECT', vpn: 'VPN', block: 'BLOCK' }
 const sections: Record<string, string> = {
-  wireguard: 'WireGuard', vless: 'VLESS', dns: 'DNS', 'destination-policy': 'Правила маршрутизации',
+  wireguard: 'WireGuard', vless: 'VPN-выход', dns: 'DNS', 'destination-policy': 'Правила маршрутизации',
 }
 const panel = 'rounded-xl border border-gray-800 bg-gray-900 p-4 sm:p-6 space-y-4'
 const field = 'w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100'
@@ -206,6 +211,7 @@ export function WorkingCore() {
   const [savedManual, setSavedManual] = useState(false)
   const [diff, setDiff] = useState<DraftDiff | null>(null)
   const [changePassword, setChangePassword] = useState(false)
+  const [awgPreview, setAwgPreview] = useState<{ ipv6_configured: boolean } | null>(null)
 
   async function run(operation: () => Promise<string>) {
     setBusy(true)
@@ -278,10 +284,10 @@ export function WorkingCore() {
     })
   }
 
-  function saveRules(rules: Rule[]) {
+  function saveRules(rules: Rule[], defaultEgress?: 'block' | 'vpn') {
     if (!data) return
     void run(async () => {
-      await http.put('/core/rules', { revision: data.revision, rules })
+      await http.put('/core/rules', { revision: data.revision, rules, ...(defaultEgress ? { default_egress: defaultEgress } : {}) })
       return 'Правила сохранены в черновике.'
     })
   }
@@ -299,6 +305,7 @@ export function WorkingCore() {
 
   const agent = data?.agent
   const pending = agent?.pending_generation_id
+  const hasVpn = Boolean(data?.vless || data?.saved_awg_egresses?.some(item => item.id === data.selected_egress_id))
   return (
     <main className="min-h-screen bg-gray-950 px-4 py-6 text-gray-100 sm:px-8">
       <div className="mx-auto max-w-5xl space-y-5">
@@ -347,7 +354,7 @@ export function WorkingCore() {
             <dl className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
               <div><dt className="text-gray-400">Активное поколение</dt><dd>{agent ? agent.active_generation || 'Нет' : 'Неизвестно'}</dd></div>
               <div><dt className="text-gray-400">Последнее подтверждённое (LKG)</dt><dd>{agent ? agent.last_known_good_generation || 'Нет' : 'Неизвестно'}</dd></div>
-              <div><dt className="text-gray-400">DNS через VLESS</dt><dd>{data.resolvers.join(', ')}</dd></div>
+              <div><dt className="text-gray-400">DNS через VPN</dt><dd>{data.resolvers.join(', ')}</dd></div>
             </dl>
             {(data.agent_error || agent?.last_error) && <p role="status" className="text-amber-400">{data.agent_error || agent?.last_error}</p>}
             {pending && <button className={secondary} disabled={busy} onClick={() => void run(async () => {
@@ -360,7 +367,7 @@ export function WorkingCore() {
                 return status.active_generation ? 'Подтверждённое поколение восстановлено.' : 'Ingress закрыт. Проверьте статус Agent.'
               })}>Восстановить LKG</button>}
             <div className="flex flex-wrap gap-2">
-              <button className={primary} disabled={busy || !agent || !data.vless || Boolean(pending)} onClick={() => void run(async () => {
+              <button className={primary} disabled={busy || !agent || !hasVpn || Boolean(pending)} onClick={() => void run(async () => {
                 setDiff((await http.post<DraftDiff>('/core/preview')).data)
                 return ''
               })}>Посмотреть изменения</button>
@@ -377,8 +384,8 @@ export function WorkingCore() {
           </section>
 
           <section className={panel} aria-labelledby="saved-egresses-heading">
-            <h2 id="saved-egresses-heading" className="text-lg font-semibold">Провайдеры и выходы VLESS</h2>
-            <p className="text-sm text-gray-400">Выбранный выход используется всеми правилами VLESS после применения конфигурации.</p>
+            <h2 id="saved-egresses-heading" className="text-lg font-semibold">Провайдеры и выходы</h2>
+            <p className="text-sm text-gray-400">Выбранный выход используется всеми правилами VPN после применения. Применение перезапускает движки и прерывает соединения.</p>
             <form onSubmit={event => {
               event.preventDefault()
               const form = event.currentTarget
@@ -402,7 +409,7 @@ export function WorkingCore() {
                   return 'Провайдер переименован.'
                 })
               }}>Переименовать</button>
-              <button className={secondary} disabled={busy || data.saved_egresses.some(item => item.provider_id === provider.id)} onClick={() => {
+              <button className={secondary} disabled={busy || [...data.saved_egresses, ...(data.saved_awg_egresses ?? [])].some(item => item.provider_id === provider.id)} onClick={() => {
                 if (!window.confirm(`Удалить провайдера «${provider.name}»?`)) return
                 void run(async () => {
                   await http.delete(`/core/providers/${provider.id}`, { data: { revision: data.revision } })
@@ -411,6 +418,70 @@ export function WorkingCore() {
               }}>Удалить провайдера</button>
             </li>)}</ul>}
             {!!data.providers?.length && <SubscriptionImport providers={data.providers} revision={data.revision} busy={busy} run={run} />}
+            <form onChange={() => setAwgPreview(null)} onSubmit={event => {
+              event.preventDefault()
+              const form = event.currentTarget
+              const body = new FormData(form)
+              const file = body.get('awgFile')
+              if (!(file instanceof File) || file.size > 24576) return
+              void run(async () => {
+                const config = await file.text()
+                await http.post('/core/awg-egresses', {
+                  revision: data.revision, name: value(body, 'awgName'),
+                  provider_id: value(body, 'awgProvider') || null, config,
+                })
+                form.reset()
+                setAwgPreview(null)
+                return 'AWG-конфигурация сохранена. Выберите выход и просмотрите изменения перед применением.'
+              })
+            }}>
+              <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
+                <legend>Импорт AmneziaWG</legend>
+                <label>Название AWG<input name="awgName" className={field} maxLength={64} required /></label>
+                <label>Провайдер AWG<select name="awgProvider" className={field} defaultValue=""><option value="">Без провайдера</option>{data.providers?.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
+                <label>Файл AWG .conf<input name="awgFile" className={field} type="file" accept=".conf" required /></label>
+                <button type="button" className={secondary} onClick={event => {
+                  const form = event.currentTarget.form
+                  const file = form && new FormData(form).get('awgFile')
+                  setAwgPreview(null)
+                  if (!(file instanceof File) || !file.size || file.size > 24576) {
+                    setError('Выберите файл AWG размером до 24 КиБ.')
+                    return
+                  }
+                  void run(async () => {
+                    const response = await http.post<{ ipv6_configured: boolean }>('/core/awg-egresses/preview', {
+                      config: await file.text(),
+                    })
+                    setAwgPreview(response.data)
+                    return 'Структура файла проверена. Совместимость и соединение ещё не проверены.'
+                  })
+                }}>Проверить файл AWG</button>
+                <button className={secondary}>Сохранить AWG</button>
+              </fieldset>
+              {awgPreview && <p className="text-sm text-gray-400">IPv6 в конфигурации: {awgPreview.ipv6_configured ? 'задан' : 'не задан'}. Проверка не подтверждает работу VPN.</p>}
+            </form>
+            {!!data.saved_awg_egresses?.length && <ul>{data.saved_awg_egresses.map(item => <li key={item.id} className="flex items-center gap-3 py-2">
+              <span>{item.name} · AWG · {data.selected_egress_id === item.id ? 'выбран в черновике' : 'сохранён'}
+                {agent?.active_egress_id === item.id && (agent.egress_state === 'unavailable' ? ' · недоступен' : agent.egress_state === 'active_verified' ? ' · последняя проверка прошла' : ' · активен, доступность не проверена')}
+                {agent?.active_egress_id === item.id && agent.egress_checked_epoch_ms ? ` · проверка: ${new Date(agent.egress_checked_epoch_ms).toLocaleString('ru-RU')}` : ''}</span>
+              {agent?.active_egress_id === item.id && <button className={secondary} disabled={busy || Boolean(pending)} onClick={() => void run(async () => {
+                const status = (await http.post<Agent>('/core/awg-egresses/probe')).data
+                return status.egress_state === 'unavailable' ? 'Последняя проверка AWG не прошла.' : 'Контрольная проверка AWG прошла.'
+              })}>Проверить AWG</button>}
+              <button className={secondary} disabled={busy || data.selected_egress_id === item.id} onClick={() => void run(async () => {
+                await http.post(`/core/awg-egresses/${item.id}/select`, { revision: data.revision })
+                return 'AWG выбран в черновике; требуется просмотр и применение.'
+              })}>Выбрать AWG</button>
+              <button className={secondary} disabled={busy || data.selected_egress_id === item.id} onClick={() => {
+                if (!window.confirm(`Удалить сохранённый выход «${item.name}»?`)) return
+                void run(async () => {
+                  await http.delete(`/core/awg-egresses/${item.id}`, { data: { revision: data.revision } })
+                  return 'AWG-конфигурация удалена.'
+                })
+              }}>Удалить AWG</button>
+            </li>)}</ul>}
+            {data.saved_awg_egresses?.some(item => item.id === data.selected_egress_id) &&
+              <p className="text-sm text-gray-400">Для AWG DNS передаётся через туннель по UDP. Большие ответы на TCP-запросы могут быть усечены; полноценный DNS пока не подтверждён.</p>}
             <form onSubmit={addSavedEgress}>
               <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
                 <label>Название<input name="name" className={field} maxLength={64} required /></label>
@@ -502,9 +573,12 @@ export function WorkingCore() {
 
           <section className={panel} aria-labelledby="rules-heading">
             <h2 id="rules-heading" className="text-lg font-semibold">Правила TCP и UDP</h2>
-            <p className="text-sm text-gray-400">По умолчанию BLOCK. Порты DNS 53 и 853 зарезервированы.</p>
+            <p className="text-sm text-gray-400">Порты DNS 53 и 853 зарезервированы. DIRECT разрешается только отдельным правилом.</p>
+            <label>Остальной трафик<select className={field} value={data.default_egress ?? 'block'} disabled={busy || !hasVpn} onChange={event => {
+              saveRules(data.rules, event.target.value === 'vpn' ? 'vpn' : 'block')
+            }}><option value="block">BLOCK</option><option value="vpn">Выбранный VPN</option></select></label>
             <form onSubmit={addRule}>
-              <fieldset className="grid items-end gap-3 sm:grid-cols-4" disabled={busy || !data.vless}>
+              <fieldset className="grid items-end gap-3 sm:grid-cols-4" disabled={busy || !hasVpn}>
                 <label>Адрес или подсеть CIDR<input name="destination" className={field} placeholder="198.51.100.10/32" required /></label>
                 <label>Порт<input name="port" className={field} type="number" min={1} max={65535} required /></label>
                 <label>Действие<select name="egress" className={field} defaultValue="vpn">

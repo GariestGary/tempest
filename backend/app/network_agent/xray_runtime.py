@@ -8,9 +8,12 @@ import tempfile
 import time
 from pathlib import Path
 
-READINESS_SECONDS = 22.0
+READINESS_SECONDS = 45.0
 XRAY_UNIT = "tempest-xray.service"
 PROBE_UNIT = "tempest-xray-probe.service"
+AWG_UNIT = "tempest-awgproxy.service"
+AWG_BINARY = Path("/opt/tempest/bin/awgproxy")
+AWG_AMD64_SHA256 = "e0fe256ad362221026a15a372a246b21026b0405e4dc32ab8f2c87c92543686e"
 XRAY_AMD64_SHA256 = "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1"
 
 
@@ -27,6 +30,8 @@ class SystemdXray:
         self._state_directory = state_directory
         self._namespace = Path("/run/netns", namespace)
         self._active = directory / "active.json"
+        self._awg_active = directory / "active-awg.conf"
+        self._awg_invocation = None
         self._check_namespace()
         info = directory.stat(follow_symlinks=False)
         if (info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o2750
@@ -101,9 +106,24 @@ class SystemdXray:
                 "Xray rejected the candidate configuration",
             )
 
-    def _identity(self) -> str | None:
+    def validate_awg(self, payload: bytes) -> None:
+        try:
+            info = AWG_BINARY.stat(follow_symlinks=False)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise XrayRuntimeError("AWG binary is not protected")
+            with AWG_BINARY.open("rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != AWG_AMD64_SHA256:
+                    raise XrayRuntimeError("AWG binary checksum mismatch")
+            with tempfile.NamedTemporaryFile(suffix=".conf", dir=self._state_directory) as candidate:
+                candidate.write(payload)
+                candidate.flush()
+                self._run([str(AWG_BINARY), "-n", "-c", candidate.name], "AWG rejected the candidate")
+        except OSError as exc:
+            raise XrayRuntimeError("AWG binary or private configuration unavailable") from exc
+
+    def _identity(self, unit: str = XRAY_UNIT) -> str | None:
         properties = dict(line.split("=", 1) for line in self._systemctl(
-            "show", XRAY_UNIT, "--property=ActiveState,MainPID,InvocationID", output=True,
+            "show", unit, "--property=ActiveState,MainPID,InvocationID", output=True,
         ).splitlines())
         if properties.get("ActiveState") in {"inactive", "failed"} and properties.get("MainPID") == "0":
             return None
@@ -118,7 +138,27 @@ class SystemdXray:
         if self._identity() is not None:
             raise XrayRuntimeError("Xray ingress did not stop")
         self._active.unlink(missing_ok=True)
+        if os.path.lexists(self._awg_active) or self._awg_invocation is not None:
+            self._systemctl("stop", AWG_UNIT)
+            if self._identity(AWG_UNIT) is not None:
+                raise XrayRuntimeError("AWG unit did not stop")
+            self._awg_active.unlink(missing_ok=True)
+            self._awg_invocation = None
         self._sync_directory()
+
+    def activate_awg(self, payload: bytes) -> None:
+        self._check_namespace()
+        self._install(self._awg_active, payload)
+        self._systemctl("start", AWG_UNIT)
+        self._awg_invocation = self._identity(AWG_UNIT)
+        if self._awg_invocation is None:
+            raise XrayRuntimeError("AWG unit did not start")
+
+    def assert_awg(self, payload: bytes) -> None:
+        self._check_namespace()
+        if (self._awg_invocation is None or self._identity(AWG_UNIT) != self._awg_invocation
+                or self._awg_active.read_bytes() != payload):
+            raise XrayRuntimeError("AWG runtime differs from the expected generation")
 
     def activate(self, payload: bytes | None) -> str | None:
         self._check_namespace()

@@ -316,6 +316,9 @@ class AgentStatus(ContractModel):
     owned_object_ids: tuple[str, ...] = ()
     last_error: str | None = None
     generation_watermark: int | None = Field(default=None, ge=0)
+    active_egress_id: UUID | None = None
+    egress_state: Literal["active_unverified", "active_verified", "unavailable"] | None = None
+    egress_checked_epoch_ms: int | None = Field(default=None, ge=0)
 
 
 class ValidationResult(ContractModel):

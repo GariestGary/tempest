@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -24,8 +24,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api import auth
 from app.config import settings
 from app.core.auth import get_current_user, hash_password
+from app.core.awg_bridge import build_awg_bridge_config
 from app.core.working_core import (
-    MAX_SAVED_EGRESSES, ClientName, Deployment, Draft, Provider, SavedEgress, VlessImport,
+    MAX_SAVED_EGRESSES, ClientName, Deployment, Draft, Provider, SavedAwgEgress, SavedEgress, VlessImport,
 )
 from app.core.working_core_subscription import (
     MAX_PASTED_BYTES, SubscriptionError, fetch_subscription, parse_exit, subscription_lines,
@@ -80,7 +81,9 @@ async def lifespan(api: FastAPI):
     settings.secret_key = secret
     key = hmac.digest(secret.encode(), b"TEMPEST Working Core VLESS at rest v1", hashlib.sha256)
     api.state.cipher = Fernet(base64.urlsafe_b64encode(key))
-    api.state.agent = XrayAgentClient(os.getenv("TEMPEST_XRAY_AGENT_SOCKET", DEFAULT_SOCKET), timeout=65.0)
+    # Failed activation can spend one readiness window on the candidate and a
+    # second on LKG recovery before the serialized Agent can reply.
+    api.state.agent = XrayAgentClient(os.getenv("TEMPEST_XRAY_AGENT_SOCKET", DEFAULT_SOCKET), timeout=120.0)
     api.state.change_lock = asyncio.Lock()
     api.state.import_previews = {}
 
@@ -159,18 +162,20 @@ async def _agent(method: str, expected: type, **args):
     return response.result
 
 
-def _plan(draft: Draft, vless: VlessEgress, status: AgentStatus) -> XrayPlan:
+def _plan(draft: Draft, vless: VlessEgress | None, status: AgentStatus) -> XrayPlan:
     try:
-        return app.state.deployment.plan(draft, vless, status)
-    except ValidationError:
+        awg = next((item for item in draft.saved_awg_egresses if item.id == draft.selected_egress_id), None)
+        raw = app.state.cipher.decrypt(awg.encrypted_config.encode()).decode() if awg else None
+        return app.state.deployment.plan(draft, None if awg else vless, status, awg_config=raw)
+    except (ValidationError, InvalidToken, UnicodeError):
         raise HTTPException(422, "The egress, peer addresses or destination rules conflict with the deployment") from None
 
 
 async def _candidate(session: AsyncSession):
     draft, _ = await _draft(session)
     vless = _load_vless(draft)
-    if vless is None:
-        raise HTTPException(422, "Configure a VLESS egress first")
+    if vless is None and not any(item.id == draft.selected_egress_id for item in draft.saved_awg_egresses):
+        raise HTTPException(422, "Configure a VPN egress first")
     status = await _agent("read_status", AgentStatus)
     return draft, _plan(draft, vless, status)
 
@@ -193,6 +198,10 @@ async def current(response: Response, session: AsyncSession = Depends(get_sessio
             {"id": item.id, "name": item.name, "provider_id": item.provider_id, "security": item.security}
             for item in draft.saved_egresses
         ],
+        "saved_awg_egresses": [
+            {"id": item.id, "name": item.name, "provider_id": item.provider_id}
+            for item in draft.saved_awg_egresses
+        ],
         "selected_egress_id": draft.selected_egress_id,
         "vless": {
             "address": vless.address, "port": vless.port,
@@ -203,6 +212,7 @@ async def current(response: Response, session: AsyncSession = Depends(get_sessio
             for client in draft.clients
         ],
         "rules": draft.rules,
+        "default_egress": draft.default_egress,
         "resolvers": app.state.deployment.resolvers,
         "agent": agent,
         "agent_error": agent_error,
@@ -212,7 +222,7 @@ async def current(response: Response, session: AsyncSession = Depends(get_sessio
 async def _save_egress(session: AsyncSession, vless: VlessEgress) -> None:
     async with app.state.change_lock:
         draft, row = await _draft(session)
-        _plan(draft, vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
+        _plan(draft.model_copy(update={"selected_egress_id": None}), vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
         encrypted = app.state.cipher.encrypt(vless.model_dump_json().encode()).decode()
         await _save(session, draft, row, encrypted_vless=encrypted, selected_egress_id=None)
 
@@ -249,6 +259,72 @@ class SavedEgressInput(DraftRevision):
 
     def egress(self) -> VlessEgress:
         return self.config if self.config is not None else self.uri.vless()
+
+
+class AwgImport(DraftRevision):
+    name: ClientName
+    provider_id: UUID | None = None
+    config: SecretStr = Field(min_length=1, max_length=24576)
+
+
+class AwgPreview(ContractModel):
+    config: SecretStr = Field(min_length=1, max_length=24576)
+
+
+@app.post("/api/core/awg-egresses/preview", dependencies=_authenticated)
+async def preview_awg(body: AwgPreview, response: Response):
+    response.headers.update(_NO_CACHE)
+    try:
+        bridge = build_awg_bridge_config(body.config.get_secret_value(), socks_port=18877)
+    except ValueError:
+        raise HTTPException(422, "Invalid AWG configuration structure", headers=_NO_CACHE) from None
+    return {"ipv6_configured": bridge.ipv6}
+
+
+@app.post("/api/core/awg-egresses", status_code=201, dependencies=_authenticated)
+async def import_awg(body: AwgImport, session: AsyncSession = Depends(get_session)):
+    # Preserve the original until a compatible adapter can validate every field.
+    # No configuration directives are executed by the control plane.
+    raw = body.config.get_secret_value()
+    try:
+        build_awg_bridge_config(raw, socks_port=18877)
+    except ValueError:
+        raise HTTPException(422, "Invalid AWG configuration structure") from None
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        if len(draft.saved_awg_egresses) >= MAX_SAVED_EGRESSES:
+            raise HTTPException(409, "Saved AWG egress limit reached")
+        if body.provider_id is not None and not any(item.id == body.provider_id for item in draft.providers):
+            raise HTTPException(404, "Provider not found")
+        item = SavedAwgEgress(id=uuid4(), name=body.name, provider_id=body.provider_id,
+                             encrypted_config=app.state.cipher.encrypt(raw.encode()).decode())
+        await _save(session, draft, row, saved_awg_egresses=(*draft.saved_awg_egresses, item))
+    return {"id": item.id, "name": item.name}
+
+
+@app.delete("/api/core/awg-egresses/{egress_id}", status_code=204, dependencies=_authenticated)
+async def delete_awg(egress_id: UUID, body: DraftRevision, session: AsyncSession = Depends(get_session)):
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        if not any(item.id == egress_id for item in draft.saved_awg_egresses):
+            raise HTTPException(404, "Saved AWG egress not found")
+        if draft.selected_egress_id == egress_id:
+            raise HTTPException(409, "Select another egress before deleting this one")
+        await _save(session, draft, row, saved_awg_egresses=tuple(item for item in draft.saved_awg_egresses if item.id != egress_id))
+
+
+@app.post("/api/core/awg-egresses/{egress_id}/select", status_code=204, dependencies=_authenticated)
+async def select_awg(egress_id: UUID, body: DraftRevision, session: AsyncSession = Depends(get_session)):
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        if not any(item.id == egress_id for item in draft.saved_awg_egresses):
+            raise HTTPException(404, "Saved AWG egress not found")
+        candidate = draft.model_copy(update={"selected_egress_id": egress_id})
+        _plan(candidate, None, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
+        await _save(session, draft, row, selected_egress_id=egress_id)
 
 
 class ProviderEdit(DraftRevision):
@@ -289,7 +365,7 @@ async def delete_provider(provider_id: UUID, body: DraftRevision, session: Async
         _check_revision(body.revision, draft)
         if not any(item.id == provider_id for item in draft.providers):
             raise HTTPException(404, "Provider not found")
-        if any(item.provider_id == provider_id for item in draft.saved_egresses):
+        if any(item.provider_id == provider_id for item in (*draft.saved_egresses, *draft.saved_awg_egresses)):
             raise HTTPException(409, "Move or delete the provider's exits first")
         await _save(session, draft, row, providers=tuple(item for item in draft.providers if item.id != provider_id))
 
@@ -341,7 +417,7 @@ def _subscription_candidates(provider_id: UUID, draft: Draft, lines: list[tuple[
             results.append({"line": number, "status": "duplicate"})
             continue
         try:
-            _plan(draft, vless, idle)
+            _plan(draft.model_copy(update={"selected_egress_id": None}), vless, idle)
         except HTTPException:
             results.append({"line": number, "status": "deployment_conflict"})
             continue
@@ -450,7 +526,7 @@ async def add_saved_egress(body: SavedEgressInput, session: AsyncSession = Depen
             raise HTTPException(409, "Saved egress limit reached")
         if body.provider_id is not None and not any(item.id == body.provider_id for item in draft.providers):
             raise HTTPException(404, "Provider not found")
-        _plan(draft, vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
+        _plan(draft.model_copy(update={"selected_egress_id": None}), vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
         encrypted = app.state.cipher.encrypt(vless.model_dump_json().encode()).decode()
         item = SavedEgress(
             id=uuid4(), name=body.name, encrypted_vless=encrypted,
@@ -469,7 +545,7 @@ async def select_saved_egress(egress_id: UUID, body: DraftRevision, session: Asy
         if item is None:
             raise HTTPException(404, "Saved egress not found")
         vless = _decrypt_vless(item.encrypted_vless)
-        _plan(draft, vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
+        _plan(draft.model_copy(update={"selected_egress_id": None}), vless, AgentStatus(state="idle", active_generation=0, last_known_good_generation=0))
         await _save(session, draft, row, encrypted_vless=item.encrypted_vless, selected_egress_id=item.id)
 
 
@@ -487,6 +563,7 @@ async def delete_saved_egress(egress_id: UUID, body: DraftRevision, session: Asy
 
 class RuleEdit(DraftRevision):
     rules: tuple[DestinationRule, ...] = Field(max_length=MAX_RULES)
+    default_egress: Literal["block", "vpn"] | None = None
 
 
 def _check_revision(revision: int, draft: Draft) -> None:
@@ -500,12 +577,13 @@ async def save_rules(body: RuleEdit, session: AsyncSession = Depends(get_session
         draft, row = await _draft(session)
         _check_revision(body.revision, draft)
         vless = _load_vless(draft)
-        if vless is None:
-            raise HTTPException(422, "Configure a VLESS egress first")
-        _plan(draft.model_copy(update={"rules": body.rules}), vless, AgentStatus(
+        if vless is None and not any(item.id == draft.selected_egress_id for item in draft.saved_awg_egresses):
+            raise HTTPException(422, "Configure a VPN egress first")
+        default_egress = body.default_egress or draft.default_egress
+        _plan(draft.model_copy(update={"rules": body.rules, "default_egress": default_egress}), vless, AgentStatus(
             state="idle", active_generation=0, last_known_good_generation=0,
         ))
-        await _save(session, draft, row, rules=body.rules)
+        await _save(session, draft, row, rules=body.rules, default_egress=default_egress)
 
 
 class ClientCreation(ContractModel):
@@ -594,3 +672,9 @@ async def rollback(generation_id: UUID):
 async def recover():
     async with app.state.change_lock:
         return await _agent("recover_lkg", AgentStatus)
+
+
+@app.post("/api/core/awg-egresses/probe", dependencies=_authenticated, response_model=AgentStatus)
+async def probe_awg():
+    async with app.state.change_lock:
+        return await _agent("probe_egress", AgentStatus)

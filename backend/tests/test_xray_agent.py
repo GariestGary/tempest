@@ -44,7 +44,7 @@ def exchange(agent, method, config=None):
     request = {"protocol_version": 1, "request_id": str(uuid4()), "method": method}
     if method in {"validate", "stage", "diff"}:
         request["plan"] = config.model_dump(mode="json")
-    elif method != "read_status":
+    elif method not in {"read_status", "probe_egress"}:
         request["generation_id"] = str(config.generation_id)
     if method == "rollback":
         request["reason"] = "test"
@@ -58,6 +58,7 @@ class Runtime:
         self.starts = []
         self.bad = False
         self.failure = None
+        self.awg = None
 
     def validate(self, payload):
         if self.bad:
@@ -81,6 +82,97 @@ class Runtime:
 
     def stop(self):
         self.active = self.run = None
+        self.awg = None
+
+    def validate_awg(self, payload):
+        if self.bad:
+            raise XrayRuntimeError("AWG checker rejected")
+
+    def activate_awg(self, payload):
+        self.awg = payload
+
+    def assert_awg(self, payload):
+        if self.awg != payload:
+            raise XrayRuntimeError("AWG drift")
+
+
+def awg_profile():
+    key = base64.b64encode(b'\x11' * 32).decode()
+    return (f'[Interface]\nPrivateKey = {key}\nAddress = 10.0.0.2/32\nDNS = 1.1.1.1\n'
+            f'[Peer]\nPublicKey = {key}\nEndpoint = 192.0.2.123:1234\nAllowedIPs = 0.0.0.0/0, ::/0\n')
+
+
+def test_awg_profile_routes_ipv4_only_and_keeps_explicit_ipv6_direct():
+    profile = plan(vless=None, awg_config=awg_profile(), default_egress='vpn', rules=[
+        {"destination": "2001:db8::1/128", "port": 443, "egress": "vpn"},
+        {"destination": "2001:db8::2/128", "port": 443, "egress": "direct"},
+    ])
+    config = json.loads(profile.config_bytes())
+    vpn = next(out for out in config['outbounds'] if out['tag'] == 'vpn')
+    assert vpn['protocol'] == 'socks'
+    assert vpn['settings']['servers'][0]['address'] == '127.0.0.1'
+    dns = next(out for out in config['outbounds'] if out['tag'] == 'vpn-dns')
+    assert dns['settings']['rewriteAddress'] == '1.1.1.1'
+    assert dns['settings']['rewriteNetwork'] == 'udp'
+    assert dns['streamSettings']['sockopt']['dialerProxy'] == 'vpn'
+    assert dns['settings']['rules'] == [{'action': 'direct'}]
+    rules = config['routing']['rules']
+    assert any(rule.get('ip') == ['2001:db8::1/128'] and rule['outboundTag'] == 'block' for rule in rules)
+    assert any(rule.get('ip') == ['2001:db8::2/128'] and rule['outboundTag'] == 'direct' for rule in rules)
+    assert any(rule.get('ip') == ['2001:db8:2::53'] and rule['outboundTag'] == 'block' for rule in rules)
+    assert rules[-2]['outboundTag'] == 'block' and rules[-2]['ip'] == ['::/0']
+    assert rules[-1]['outboundTag'] == 'vpn'
+
+
+def test_awg_apply_rollback_and_restart_preserve_vless_lkg(state_dir):
+    runtime = Runtime()
+    with XrayJournal(state_dir) as journal:
+        agent = make_agent(runtime, journal)
+        old = plan()
+        apply(agent, old)
+        candidate = plan(generation=2, base=1, vless=None, awg_config=awg_profile())
+        apply(agent, candidate, confirm=False)
+        assert runtime.awg is not None
+        assert exchange(agent, 'rollback', candidate).ok
+        assert runtime.awg is None and runtime.active == old.config_bytes()
+        candidate = plan(generation=3, base=1, vless=None, awg_config=awg_profile())
+        apply(agent, candidate)
+        restarted = make_agent(runtime, journal)
+        assert restarted._status().last_known_good_generation == 3
+        assert runtime.awg == candidate.awg_bridge().payload
+        runtime.awg = None
+        status = exchange(restarted, 'read_status')
+        assert status.ok and status.result.egress_state == 'unavailable'
+        assert runtime.active == candidate.config_bytes()
+
+
+def test_awg_failed_verification_restores_vless_lkg(state_dir):
+    runtime = Runtime()
+    with XrayJournal(state_dir) as journal:
+        agent = make_agent(runtime, journal)
+        original = plan()
+        apply(agent, original)
+        candidate = plan(generation=2, base=1, vless=None, awg_config=awg_profile())
+        runtime.failure = candidate.config_bytes()
+        assert exchange(agent, 'stage', candidate).ok
+        assert not exchange(agent, 'apply', candidate).ok
+        assert runtime.awg is None and runtime.active == original.config_bytes()
+
+
+def test_awg_transport_probe_reports_failure_without_stopping_direct(state_dir):
+    runtime = Runtime()
+    with XrayJournal(state_dir) as journal:
+        agent = make_agent(runtime, journal)
+        profile = plan(vless=None, awg_config=awg_profile())
+        apply(agent, profile)
+        assert exchange(agent, 'read_status').result.egress_state == 'active_verified'
+        runtime.failure = profile.config_bytes()
+        failed = exchange(agent, 'probe_egress')
+        assert failed.ok and failed.result.egress_state == 'unavailable'
+        assert failed.result.egress_checked_epoch_ms is not None
+        assert runtime.active == profile.config_bytes() and runtime.awg is not None
+        runtime.failure = None
+        assert exchange(agent, 'probe_egress').result.egress_state == 'active_verified'
 
 
 @pytest.fixture
@@ -261,7 +353,7 @@ def test_pinned_xray_accepts_generated_config(tmp_path):
         pytest.skip("TEMPEST_TEST_XRAY not supplied")
     target = tmp_path / "candidate.json"
     tls = plan()
-    variants = [("TLS", tls)]
+    variants = [("TLS", tls), ("AWG SOCKS", plan(vless=None, awg_config=awg_profile(), default_egress="vpn"))]
     common = tls.vless.model_dump(mode="json", exclude={"certificate_sha256"})
     public_key = base64.urlsafe_b64encode(bytes(range(1, 33))).decode().rstrip("=")
     for fingerprint in ("chrome", "firefox", "safari", "ios", "edge"):
