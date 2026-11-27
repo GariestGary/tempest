@@ -1,4 +1,6 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { Activity, Boxes, Cable, ChevronLeft, CircleUserRound, LayoutDashboard, LogOut, Menu, Route, Settings2, ShieldCheck, UsersRound } from 'lucide-react'
+import './working-core.css'
 import { useQuery } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import { authApi, http } from '@/api/client'
@@ -204,6 +206,10 @@ export function WorkingCore() {
     queryFn: () => http.get<Gateway>('/core').then(response => response.data),
     retry: false,
   })
+  const [page, setPage] = useState('overview')
+  const [collapsed, setCollapsed] = useState(false)
+  const [mobileNav, setMobileNav] = useState(false)
+  const [search, setSearch] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
@@ -212,6 +218,12 @@ export function WorkingCore() {
   const [diff, setDiff] = useState<DraftDiff | null>(null)
   const [changePassword, setChangePassword] = useState(false)
   const [awgPreview, setAwgPreview] = useState<{ ipv6_configured: boolean } | null>(null)
+
+  useEffect(() => {
+    const closeMenu = (event: KeyboardEvent) => { if (event.key === 'Escape') setMobileNav(false) }
+    window.addEventListener('keydown', closeMenu)
+    return () => window.removeEventListener('keydown', closeMenu)
+  }, [])
 
   async function run(operation: () => Promise<string>) {
     setBusy(true)
@@ -307,20 +319,34 @@ export function WorkingCore() {
   const pending = agent?.pending_generation_id
   const hasVpn = Boolean(data?.vless || data?.saved_awg_egresses?.some(item => item.id === data.selected_egress_id))
   return (
-    <main className="min-h-screen bg-gray-950 px-4 py-6 text-gray-100 sm:px-8">
-      <div className="mx-auto max-w-5xl space-y-5">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold">TEMPEST <span className="text-base font-normal text-gray-400">Working Core</span></h1>
-          <div className="flex flex-wrap gap-2 text-sm">
-            <button type="button" className={secondary} onClick={() => setChangePassword(!changePassword)}>Сменить пароль</button>
-            <button type="button" className={secondary} onClick={() => {
-              localStorage.removeItem('pitun_token')
-              window.location.assign('/login')
-            }}>Выйти</button>
-          </div>
+    <div className={`wc-shell ${collapsed ? 'is-collapsed' : ''}`} data-page={page}>
+      <aside className={`wc-sidebar ${mobileNav ? 'is-open' : ''}`}>
+        <div className="wc-brand"><span className="wc-logo"><ShieldCheck size={20} /></span><span className="wc-brand-text"><strong>TEMPEST</strong><small>VPN GATEWAY</small></span></div>
+        <div className="wc-nav-label">УПРАВЛЕНИЕ</div>
+        <nav aria-label="Основная навигация" className="wc-nav">
+          {([
+            ['overview', 'Обзор', LayoutDashboard], ['providers', 'Провайдеры', Boxes],
+            ['egress', 'Выходы', Cable], ['routing', 'Маршрутизация', Route],
+            ['clients', 'Клиенты', UsersRound], ['settings', 'Настройки', Settings2],
+          ] as const).map(([id, label, Icon]) => <button key={id as string} type="button" title={label as string}
+            aria-current={page === id ? 'page' : undefined} onClick={() => { setPage(id as string); setSearch(''); setMobileNav(false); document.getElementById('main-content')?.scrollTo(0, 0) }}>
+            <Icon size={19} /><span>{label as string}</span>
+          </button>)}
+        </nav>
+        <div className="wc-sidebar-bottom"><span className="wc-sidebar-caption">SELF-HOSTED GATEWAY</span><button type="button" className="wc-collapse" onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}><ChevronLeft size={18} /></button></div>
+      </aside>
+      {mobileNav && <button className="wc-backdrop" aria-label="Закрыть меню" onClick={() => setMobileNav(false)} />}
+      <div className="wc-workspace">
+        <header className="wc-topbar">
+          <button className="wc-menu" onClick={() => setMobileNav(!mobileNav)} aria-label="Открыть меню"><Menu size={20} /></button>
+          <div className="wc-breadcrumb"><span>TEMPEST</span><span className="wc-slash">/</span><strong>{({ overview: 'Обзор', providers: 'Провайдеры', egress: 'Выходы', routing: 'Маршрутизация', clients: 'Клиенты', settings: 'Настройки' } as Record<string, string>)[page]}</strong></div>
+          <div className="wc-top-actions"><span className={`wc-agent ${agent ? 'online' : ''}`}><i />{agent ? 'Agent подключён' : 'Agent недоступен'}</span><button type="button" className="wc-account" onClick={() => setPage('settings')} aria-label="Настройки учётной записи"><CircleUserRound size={19}/></button><button type="button" className="wc-account" aria-label="Выйти" onClick={() => { localStorage.removeItem('pitun_token'); window.location.assign('/login') }}><LogOut size={18}/></button></div>
         </header>
-
-        {changePassword && <form className={panel} onSubmit={event => {
+        <main className="wc-main" id="main-content">
+          <div className="wc-content">
+            <div className="wc-page-heading"><div><div className="wc-eyebrow"><Activity size={14}/> WORKING CORE</div><h1>{({ overview: 'Обзор системы', providers: 'Провайдеры', egress: 'Исходящие подключения', routing: 'Маршрутизация', clients: 'Клиенты WireGuard', settings: 'Настройки' } as Record<string, string>)[page]}</h1><p>{({ overview: 'Состояние шлюза и управление конфигурацией', providers: 'Организуйте подключения по провайдерам', egress: 'Управляйте каталогом и выбором VPN-выхода', routing: 'Определите, куда направлять трафик', clients: 'Управляйте доступом ваших устройств', settings: 'Учётная запись и доступ к панели' } as Record<string, string>)[page]}</p></div></div>
+            <div className="wc-settings-only"><div className="wc-settings-card"><h2>Учётная запись</h2><p>Обновите пароль для входа в панель управления.</p><button className={secondary} onClick={() => setChangePassword(!changePassword)}>Сменить пароль</button></div></div>
+        {changePassword && page === 'settings' && <form className={panel} onSubmit={event => {
           event.preventDefault()
           const form = event.currentTarget
           const values = new FormData(form)
@@ -346,7 +372,8 @@ export function WorkingCore() {
         {isError && <p role="alert">Панель не смогла загрузить конфигурацию. <button className={secondary} onClick={() => void refetch()}>Повторить</button></p>}
 
         {data && <>
-          <section className={panel} aria-labelledby="apply-heading">
+          <section className={`${panel} wc-overview`} aria-labelledby="apply-heading">
+            <div className="wc-overview-intro"><span className="wc-overview-icon"><Activity size={20}/></span><div><strong>Рабочая конфигурация</strong><p>Состояние и безопасное применение изменений</p></div><span className="wc-overview-revision">ЧЕРНОВИК · {data.revision}</span></div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="apply-heading" className="text-lg font-semibold">Конфигурация</h2>
               <button className={secondary} disabled={busy} onClick={() => void refetch()}>Обновить статус</button>
@@ -355,6 +382,7 @@ export function WorkingCore() {
               <div><dt className="text-gray-400">Активное поколение</dt><dd>{agent ? agent.active_generation || 'Нет' : 'Неизвестно'}</dd></div>
               <div><dt className="text-gray-400">Последнее подтверждённое (LKG)</dt><dd>{agent ? agent.last_known_good_generation || 'Нет' : 'Неизвестно'}</dd></div>
               <div><dt className="text-gray-400">DNS через VPN</dt><dd>{data.resolvers.join(', ')}</dd></div>
+              <div><dt className="text-gray-400">Выход в черновике</dt><dd>{[...(data.saved_awg_egresses ?? []), ...(data.saved_egresses ?? [])].find(item => item.id === data.selected_egress_id)?.name ?? (data.vless ? 'VLESS' : 'Не выбран')}</dd></div>
             </dl>
             {(data.agent_error || agent?.last_error) && <p role="status" className="text-amber-400">{data.agent_error || agent?.last_error}</p>}
             {pending && <button className={secondary} disabled={busy} onClick={() => void run(async () => {
@@ -383,10 +411,10 @@ export function WorkingCore() {
             {busy && <p role="status" className="text-sm text-gray-400">Выполняется запрос…</p>}
           </section>
 
-          <section className={panel} aria-labelledby="saved-egresses-heading">
-            <h2 id="saved-egresses-heading" className="text-lg font-semibold">Провайдеры и выходы</h2>
-            <p className="text-sm text-gray-400">Выбранный выход используется всеми правилами VPN после применения. Применение перезапускает движки и прерывает соединения.</p>
-            <form onSubmit={event => {
+          <section className={`${panel} wc-catalog`} aria-labelledby="saved-egresses-heading">
+            <h2 id="saved-egresses-heading" className="text-lg font-semibold">{page === 'providers' ? 'Ваши провайдеры' : 'Каталог выходов'}</h2>
+            <p className="text-sm text-gray-400">{page === 'providers' ? 'Объединяйте связанные VPN-выходы по провайдерам.' : 'Выбранный выход используется правилами VPN после применения. Применение прерывает соединения.'}</p>
+            <div className="wc-providers-only"><details className="wc-action"><summary>Добавить провайдера</summary><form onSubmit={event => {
               event.preventDefault()
               const form = event.currentTarget
               const name = value(new FormData(form), 'providerName')
@@ -399,6 +427,7 @@ export function WorkingCore() {
               <label>Название провайдера<input name="providerName" className={field} maxLength={64} required /></label>
               <button className={secondary} disabled={busy}>Добавить провайдера</button>
             </form>
+            </details>
             {!!data.providers?.length && <ul className="space-y-2">{data.providers.map(provider => <li key={provider.id} className="flex flex-wrap items-center gap-2">
               <span>{provider.name}</span>
               <button className={secondary} disabled={busy} onClick={() => {
@@ -417,8 +446,11 @@ export function WorkingCore() {
                 })
               }}>Удалить провайдера</button>
             </li>)}</ul>}
+            {!data.providers?.length && <p className="wc-empty">Провайдеров пока нет. Добавьте первого, чтобы упорядочить выходы.</p>}</div>
+            <div className="wc-egress-only">
+            <label className="wc-search">Поиск выходов<input type="search" placeholder="Название выхода" value={search} onChange={event => setSearch(event.target.value)} /></label>
             {!!data.providers?.length && <SubscriptionImport providers={data.providers} revision={data.revision} busy={busy} run={run} />}
-            <form onChange={() => setAwgPreview(null)} onSubmit={event => {
+            <details className="wc-action"><summary>Импортировать AWG</summary><form onChange={() => setAwgPreview(null)} onSubmit={event => {
               event.preventDefault()
               const form = event.currentTarget
               const body = new FormData(form)
@@ -460,7 +492,8 @@ export function WorkingCore() {
               </fieldset>
               {awgPreview && <p className="text-sm text-gray-400">IPv6 в конфигурации: {awgPreview.ipv6_configured ? 'задан' : 'не задан'}. Проверка не подтверждает работу VPN.</p>}
             </form>
-            {!!data.saved_awg_egresses?.length && <ul>{data.saved_awg_egresses.map(item => <li key={item.id} className="flex items-center gap-3 py-2">
+            </details>
+            {!!data.saved_awg_egresses?.length && <ul>{data.saved_awg_egresses.filter(item => item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(item => <li key={item.id} className="flex flex-wrap items-center gap-3 py-2">
               <span>{item.name} · AWG · {data.selected_egress_id === item.id ? 'выбран в черновике' : 'сохранён'}
                 {agent?.active_egress_id === item.id && (agent.egress_state === 'unavailable' ? ' · недоступен' : agent.egress_state === 'active_verified' ? ' · последняя проверка прошла' : ' · активен, доступность не проверена')}
                 {agent?.active_egress_id === item.id && agent.egress_checked_epoch_ms ? ` · проверка: ${new Date(agent.egress_checked_epoch_ms).toLocaleString('ru-RU')}` : ''}</span>
@@ -481,8 +514,8 @@ export function WorkingCore() {
               }}>Удалить AWG</button>
             </li>)}</ul>}
             {data.saved_awg_egresses?.some(item => item.id === data.selected_egress_id) &&
-              <p className="text-sm text-gray-400">Для AWG DNS передаётся через туннель по UDP. Большие ответы на TCP-запросы могут быть усечены; полноценный DNS пока не подтверждён.</p>}
-            <form onSubmit={addSavedEgress}>
+              <p className="text-sm text-gray-400">Проверьте доступность DNS вместе с подключением после применения конфигурации.</p>}
+            <details className="wc-action"><summary>Добавить VLESS в каталог</summary><form onSubmit={addSavedEgress}>
               <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
                 <label>Название<input name="name" className={field} maxLength={64} required /></label>
                 <label>Провайдер<select name="provider" className={field} defaultValue=""><option value="">Без провайдера</option>{data.providers?.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
@@ -498,8 +531,9 @@ export function WorkingCore() {
                 <button className={primary}>Сохранить выход</button>
               </fieldset>
             </form>
+            </details>
             {!!data.saved_egresses?.length && <ul className="divide-y divide-gray-800">
-              {data.saved_egresses.map(item => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+              {data.saved_egresses.filter(item => item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(item => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <span>{item.name} · {securityLabel(item.security)}{item.id === data.selected_egress_id ? ' · выбран в черновике' : ''}</span>
                 <label>Провайдер выхода «{item.name}»<select className={field} value={item.provider_id ?? ''} disabled={busy} onChange={event => {
                   const provider_id = event.target.value || null
@@ -523,12 +557,14 @@ export function WorkingCore() {
                 </div>
               </li>)}
             </ul>}
+            {!data.saved_egresses?.length && !data.saved_awg_egresses?.length && <p className="wc-empty">Выходов пока нет. Импортируйте конфигурацию AWG или добавьте VLESS.</p>}</div>
           </section>
 
-          <div className="grid gap-5 lg:grid-cols-2">
-            <section className={panel} aria-labelledby="egress-heading">
+          <div className="wc-secondary-sections">
+            <section className={`${panel} wc-legacy-egress`} aria-labelledby="egress-heading">
               <h2 id="egress-heading" className="text-lg font-semibold">Выход VLESS</h2>
               <p className="text-sm text-gray-400">{data.vless ? `${securityLabel(data.vless.security)} · ${data.vless.server_name} · ${data.vless.address} · ${data.vless.port}` : 'Выход ещё не настроен.'}</p>
+              <details className="wc-action"><summary>Изменить прямой VLESS</summary>
               <div className="flex flex-wrap gap-2" aria-label="Способ добавления VLESS">
                 <button className={secondary} aria-pressed={importing} onClick={() => setImporting(true)} disabled={busy}>Импорт ссылки</button>
                 <button className={secondary} aria-pressed={!importing} onClick={() => setImporting(false)} disabled={busy}>Ручной ввод</button>
@@ -542,19 +578,23 @@ export function WorkingCore() {
                   <button className={primary}>Сохранить выход</button>
                 </fieldset>
               </form>
+              </details>
             </section>
 
-            <section className={panel} aria-labelledby="clients-heading">
+            <section className={`${panel} wc-clients`} aria-labelledby="clients-heading">
               <h2 id="clients-heading" className="text-lg font-semibold">Клиенты WireGuard</h2>
-              <form onSubmit={createClient}>
+              <details className="wc-action"><summary>Добавить клиента</summary><form onSubmit={createClient}>
                 <fieldset className="space-y-3" disabled={busy}>
                   <label className="block">Имя клиента<input name="name" className={field} maxLength={64} required /></label>
                   <button className={primary}>Создать и скачать .conf</button>
                 </fieldset>
               </form>
+              </details>
               <p className="text-sm text-gray-400">Скачивание доступно при создании. Доступ нового клиента включается при применении черновика.</p>
+              <label className="wc-search">Поиск клиентов<input type="search" placeholder="Имя клиента" value={search} onChange={event => setSearch(event.target.value)} /></label>
+              {!data.clients.length && <p className="wc-empty">Клиентов пока нет. Создайте конфигурацию для первого устройства.</p>}
               {!!data.clients.length && <ul className="divide-y divide-gray-800">
-                {data.clients.map(client => <li key={client.id} className="flex items-center justify-between gap-3 py-3">
+                {data.clients.filter(client => client.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(client => <li key={client.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                   <div className="min-w-0">
                     <div className="break-words">{client.name}</div>
                     <div className="break-words text-sm text-gray-400">{client.addresses.join(', ')}</div>
@@ -571,13 +611,13 @@ export function WorkingCore() {
             </section>
           </div>
 
-          <section className={panel} aria-labelledby="rules-heading">
+          <section className={`${panel} wc-routing`} aria-labelledby="rules-heading">
             <h2 id="rules-heading" className="text-lg font-semibold">Правила TCP и UDP</h2>
             <p className="text-sm text-gray-400">Порты DNS 53 и 853 зарезервированы. DIRECT разрешается только отдельным правилом.</p>
             <label>Остальной трафик<select className={field} value={data.default_egress ?? 'block'} disabled={busy || !hasVpn} onChange={event => {
               saveRules(data.rules, event.target.value === 'vpn' ? 'vpn' : 'block')
             }}><option value="block">BLOCK</option><option value="vpn">Выбранный VPN</option></select></label>
-            <form onSubmit={addRule}>
+            <details className="wc-action"><summary>Добавить правило</summary><form onSubmit={addRule}>
               <fieldset className="grid items-end gap-3 sm:grid-cols-4" disabled={busy || !hasVpn}>
                 <label>Адрес или подсеть CIDR<input name="destination" className={field} placeholder="198.51.100.10/32" required /></label>
                 <label>Порт<input name="port" className={field} type="number" min={1} max={65535} required /></label>
@@ -587,6 +627,8 @@ export function WorkingCore() {
                 <button className={primary}>Добавить правило</button>
               </fieldset>
             </form>
+            </details>
+            {!data.rules.length && <p className="wc-empty">Правил пока нет. Используется политика по умолчанию.</p>}
             {!!data.rules.length && <ul className="divide-y divide-gray-800">
               {data.rules.map((rule, index) => <li key={`${rule.destination}-${rule.port}`} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <span>{rule.destination} · {rule.port} · {actions[rule.egress]}</span>
@@ -595,7 +637,9 @@ export function WorkingCore() {
             </ul>}
           </section>
         </>}
+          </div>
+        </main>
       </div>
-    </main>
+    </div>
   )
 }
