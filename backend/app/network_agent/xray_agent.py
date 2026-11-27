@@ -34,6 +34,9 @@ class Snapshot(ContractModel):
         bridge = plan.awg_bridge()
         if bridge is not None:
             data += b'\0AWG\0' + bridge.payload
+        dns = plan.awg_dns_bytes()
+        if dns is not None:
+            data += b'\0AWG-DNS\0' + dns
         return hashlib.sha256(data).hexdigest()
 
     def payload(self) -> bytes:
@@ -164,10 +167,15 @@ class XrayAgent:
         bridge = snapshot.plan.awg_bridge()
         if payload is not None and bridge is not None:
             self._runtime.activate_awg(bridge.payload)
+            dns = snapshot.plan.awg_dns_bytes()
+            if dns is not None:
+                self._runtime.activate_dns(dns)
         invocation = self._runtime.activate(payload)
         self._runtime.verify(payload, invocation)
         if payload is not None and bridge is not None:
             self._runtime.assert_awg(bridge.payload)
+            if dns is not None:
+                self._runtime.assert_dns(dns)
             self._egress_probe_ok = True
             self._egress_checked_ms = time.time_ns() // 1_000_000
         self._active = snapshot
@@ -196,6 +204,9 @@ class XrayAgent:
         if active is not None and active.awg_config is not None:
             try:
                 self._runtime.assert_awg(active.awg_bridge().payload)
+                dns = active.awg_dns_bytes()
+                if dns is not None:
+                    self._runtime.assert_dns(dns)
                 egress_state = ("active_unverified" if self._egress_probe_ok is None else
                                 "active_verified" if self._egress_probe_ok else "unavailable")
             except (OSError, ValueError, XrayRuntimeError):
@@ -231,6 +242,9 @@ class XrayAgent:
         bridge = snapshot.plan.awg_bridge()
         if bridge is not None:
             self._runtime.validate_awg(bridge.payload)
+            dns = snapshot.plan.awg_dns_bytes()
+            if dns is not None:
+                self._runtime.validate_dns(dns)
 
     def _diff(self, candidate: Snapshot) -> NetworkDiff:
         plan = candidate.plan
@@ -238,7 +252,7 @@ class XrayAgent:
         fields = {
             "wireguard": ("tunnel_addresses", "private_key", "peers", "probe"),
             "vless": ("vless", "awg_config", "egress_id"),
-            "dns": ("resolvers",),
+            "dns": ("resolvers", "awg_dns"),
             "destination-policy": ("rules", "default_egress"),
         }
         return NetworkDiff(
@@ -303,6 +317,9 @@ class XrayAgent:
             bridge = self._active.plan.awg_bridge()
             if bridge is not None and self._runtime_payload(self._active) is not None:
                 self._runtime.assert_awg(bridge.payload)
+                dns = self._active.plan.awg_dns_bytes()
+                if dns is not None:
+                    self._runtime.assert_dns(dns)
         else:
             self._runtime.assert_current(self._runtime_payload(self._active), self._invocation)
         self.maintain()
@@ -378,6 +395,9 @@ class XrayAgent:
                 try:
                     self._runtime.verify(payload, self._invocation)
                     self._runtime.assert_awg(self._active.plan.awg_bridge().payload)
+                    dns = self._active.plan.awg_dns_bytes()
+                    if dns is not None:
+                        self._runtime.assert_dns(dns)
                     self._egress_probe_ok = True
                 except (OSError, ValueError, XrayRuntimeError):
                     # A failed egress must not close explicit DIRECT paths.

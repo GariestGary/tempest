@@ -5,7 +5,7 @@ polkit.addRule(function (action, subject) {
     }
     var unit = action.lookup("unit");
     var verb = action.lookup("verb");
-    if (((unit === "tempest-xray.service" || unit === "tempest-awgproxy.service") && (verb === "start" || verb === "stop")) ||
+    if (((unit === "tempest-xray.service" || unit === "tempest-awgproxy.service" || unit === "tempest-awg-dns.service") && (verb === "start" || verb === "stop")) ||
         (unit === "tempest-xray-probe.service" && verb === "start")) {
         return polkit.Result.YES;
     }

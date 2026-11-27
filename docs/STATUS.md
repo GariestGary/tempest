@@ -2,6 +2,10 @@
 
 > 2026-11-26: владелец принял A `ACCEPTED_WITH_LIMITATIONS` на `93feeab084e2a66e1371e7f503baede6d1f32c6d`. Записи ниже исторические; внешний клиент и UDP ingress проверяются при первом практическом подключении. Текущий приоритет — AWG egress, см. [roadmap](PROJECT_SPEC.md#15-действующий-roadmap).
 
+## 2026-11-27 · AWG DNS adapter — WIP
+
+На Windows синтетический loopback стенд sing-box 1.14.2 прошёл TCP/UDP DNS, большой DNSKEY без TC по TCP, SOCKS auth, проверку доверия и имени TLS, числовой адрес без bootstrap и отрицательные сценарии SOCKS/TLS без наблюдаемого прямого подключения. GOST исключён из-за отключённой проверки TLS в его DNS exchanger. Подготовлены opt-in конфигурация sing-box, привязка к XrayPlan/Agent/LKG и lab probe; старый AWG LKG сохраняет прежнюю генерацию. Targeted pytest 31 passed / 11 skipped, тест lab DNSKEY probe 1 passed; конфиги приняты Xray 26.10.31 и sing-box 1.14.2. Linux-only AF_UNIX/SO_PEERCRED и systemd runtime `NOT_RUN_ON_WINDOWS`; цепочка Xray → AWG, отказ и recovery на реальной VM и CI/CodeQL `NOT_RUN`. DNS остаётся `INCOMPLETE`, поведение реальной подписки не подтверждено. [Подробности и план](HANDOFF.md).
+
 ## 2026-11-27 · AWG: реальный трафик, DNS не завершён
 
 Текущая реализация и результаты сохранены в рабочем дереве на базе `93feeab084e2a66e1371e7f503baede6d1f32c6d`; функциональный checkpoint не опубликован. На согласованной disposable VM пользователь импортировал реальный AWG-профиль. WG-клиент в отдельном namespace прошёл через TEMPEST и AWG в интернет: внешний IPv4 совпал с наблюдением на AWG SOCKS, HTTPS и UDP NTP прошли. Переключение VLESS → AWG выполнено без изменения ключа клиентского peer. В отдельных проверках были таймауты с последующими успешными повторами; лабораторный endpoint relay остаётся зависимостью стенда, стабильность не доказана.

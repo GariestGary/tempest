@@ -16,6 +16,7 @@ from .models import (
     ApplyRequest, ConfirmRequest, ContractModel, GenerationPlan, IPCProtocolError,
     MAX_IPC_MESSAGE_BYTES, ReadStatusRequest, RollbackRequest, VerifyRequest,
 )
+from .awg_dns import AwgDns, DNS_ADAPTER_PORT
 
 INBOUND = "wg-mvp"
 DNS_PORTS = (53, 853)
@@ -159,6 +160,7 @@ class XrayPlan(GenerationPlan):
     peers: tuple[WireGuardPeer, ...] = Field(max_length=MAX_PEERS)
     vless: VlessEgress | None = None
     awg_config: str | None = Field(default=None, min_length=1, max_length=24576, repr=False, exclude_if=lambda value: value is None)
+    awg_dns: AwgDns | None = Field(default=None, exclude_if=lambda value: value is None)
     egress_id: UUID | None = Field(default=None, exclude_if=lambda value: value is None)
     resolvers: tuple[IPvAnyAddress, ...] = Field(min_length=1, max_length=2)
     rules: tuple[DestinationRule, ...] = Field(max_length=MAX_RULES)
@@ -171,6 +173,8 @@ class XrayPlan(GenerationPlan):
             raise ValueError("exactly one VPN egress is required")
         if self.awg_config is not None:
             self.awg_bridge()
+        elif self.awg_dns is not None:
+            raise ValueError("AWG DNS requires an AWG egress")
         _check_host_addresses(self.tunnel_addresses)
         peers = self.runtime_peers()
         keys = [peer.public_key for peer in peers]
@@ -199,6 +203,12 @@ class XrayPlan(GenerationPlan):
             return None
         password = hashlib.sha256((str(self.generation_id) + self.awg_config).encode()).hexdigest()
         return build_awg_bridge_config(self.awg_config, socks_port=AWG_SOCKS_PORT, socks_password=password)
+
+    def awg_dns_bytes(self) -> bytes | None:
+        if self.awg_dns is None:
+            return None
+        password = hashlib.sha256((str(self.generation_id) + self.awg_config).encode()).hexdigest()
+        return self.awg_dns.config_bytes(password, AWG_SOCKS_PORT)
 
     def config_bytes(self) -> bytes:
         import json
@@ -233,6 +243,11 @@ class XrayPlan(GenerationPlan):
         ipv4_only = bridge is not None and not bridge.ipv6
         if bridge is None:
             dns_outbound = []
+        elif self.awg_dns is not None:
+            dns_outbound = [{"protocol": "dns", "tag": "vpn-dns", "settings": {
+                "rewriteAddress": "127.0.0.1", "rewritePort": DNS_ADAPTER_PORT,
+                "rules": [{"action": "direct"}],
+            }}]
         else:
             dns_outbound = [{"protocol": "dns", "tag": "vpn-dns",
                              "settings": {"rewriteAddress": bridge.resolver_ipv4, "rewriteNetwork": "udp",

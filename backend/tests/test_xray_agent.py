@@ -59,6 +59,8 @@ class Runtime:
         self.bad = False
         self.failure = None
         self.awg = None
+        self.dns = None
+        self.dns_failure = False
 
     def validate(self, payload):
         if self.bad:
@@ -83,6 +85,7 @@ class Runtime:
     def stop(self):
         self.active = self.run = None
         self.awg = None
+        self.dns = None
 
     def validate_awg(self, payload):
         if self.bad:
@@ -94,6 +97,19 @@ class Runtime:
     def assert_awg(self, payload):
         if self.awg != payload:
             raise XrayRuntimeError("AWG drift")
+
+    def validate_dns(self, payload):
+        if self.bad:
+            raise XrayRuntimeError("DNS checker rejected")
+
+    def activate_dns(self, payload):
+        if self.dns_failure:
+            raise XrayRuntimeError('DNS adapter did not start')
+        self.dns = payload
+
+    def assert_dns(self, payload):
+        if self.dns != payload:
+            raise XrayRuntimeError("DNS drift")
 
 
 def awg_profile():
@@ -122,6 +138,136 @@ def test_awg_profile_routes_ipv4_only_and_keeps_explicit_ipv6_direct():
     assert any(rule.get('ip') == ['2001:db8:2::53'] and rule['outboundTag'] == 'block' for rule in rules)
     assert rules[-2]['outboundTag'] == 'block' and rules[-2]['ip'] == ['::/0']
     assert rules[-1]['outboundTag'] == 'vpn'
+
+
+def test_awg_dns_profile_is_explicit_and_preserves_old_snapshot():
+    from app.network_agent.xray_agent import Snapshot
+    old = plan(vless=None, awg_config=awg_profile())
+    old_snapshot = Snapshot.create(old)
+    assert old.awg_dns_bytes() is None
+    assert 'awg_dns' not in old.model_dump(mode='json')
+    assert Snapshot.model_validate_json(old_snapshot.model_dump_json()).payload() == old.config_bytes()
+    configured = plan(vless=None, awg_config=awg_profile(), awg_dns={
+        'address': '1.1.1.1', 'server_name': 'cloudflare-dns.com',
+    })
+    dns = json.loads(configured.awg_dns_bytes())
+    assert dns['dns']['servers'][0]['server'] == '1.1.1.1'
+    assert dns['dns']['servers'][0]['tls']['server_name'] == 'cloudflare-dns.com'
+    assert dns['dns']['servers'][0]['detour'] == 'awg'
+    assert dns['outbounds'][0]['server'] == '127.0.0.1'
+    xray = json.loads(configured.config_bytes())
+    out = next(item for item in xray['outbounds'] if item['tag'] == 'vpn-dns')
+    assert out['settings']['rewriteAddress'] == '127.0.0.1'
+    assert out['settings']['rewritePort'] == 18878
+    assert 'rewriteNetwork' not in out['settings']
+    assert 'streamSettings' not in out
+    assert Snapshot.create(configured).fingerprint != old_snapshot.fingerprint
+    with pytest.raises(ValidationError):
+        plan(awg_dns={'address': '1.1.1.1', 'server_name': 'cloudflare-dns.com'})
+    with pytest.raises(ValidationError):
+        plan(vless=None, awg_config=awg_profile(), awg_dns={'address': '127.0.0.1', 'server_name': 'dns.test'})
+
+
+def test_awg_dns_lifecycle_rollback_and_revoke_without_posix_journal():
+    from app.network_agent.xray_agent import XrayRecord
+
+    class MemoryJournal:
+        record = XrayRecord()
+
+        def read(self):
+            return self.record
+
+        def write(self, record):
+            self.record = record
+
+    runtime = Runtime()
+    journal = MemoryJournal()
+    agent = make_agent(runtime, journal)
+    old = plan(vless=None, awg_config=awg_profile())
+    apply(agent, old)
+    candidate = plan(generation=2, base=1, vless=None, awg_config=awg_profile(), awg_dns={
+        'address': '1.1.1.1', 'server_name': 'cloudflare-dns.com',
+    })
+    apply(agent, candidate, confirm=False)
+    assert runtime.dns == candidate.awg_dns_bytes()
+    assert exchange(agent, 'rollback', candidate).ok
+    assert runtime.dns is None and runtime.active == old.config_bytes()
+    candidate = plan(generation=3, base=1, vless=None, awg_config=awg_profile(), awg_dns={
+        'address': '1.1.1.1', 'server_name': 'cloudflare-dns.com',
+    })
+    apply(agent, candidate)
+    restarted = make_agent(runtime, journal)
+    assert runtime.dns == candidate.awg_dns_bytes()
+    assert restarted._status().last_known_good_generation == 3
+    request = parse_xray_request(json.dumps({
+        'protocol_version': 1, 'request_id': str(uuid4()), 'method': 'revoke_peer',
+        'public_key': candidate.peers[0].public_key,
+    }).encode())
+    assert restarted.handle_request(request).ok
+    assert candidate.peers[0].public_key in journal.record.revoked
+    assert not journal.record.lkg.plan.peers
+
+
+def test_awg_dns_failure_restores_old_generation_without_posix_journal():
+    from app.network_agent.xray_agent import XrayRecord
+
+    class MemoryJournal:
+        record = XrayRecord()
+
+        def read(self):
+            return self.record
+
+        def write(self, record):
+            self.record = record
+
+    runtime = Runtime()
+    journal = MemoryJournal()
+    agent = make_agent(runtime, journal)
+    old = plan(vless=None, awg_config=awg_profile())
+    apply(agent, old)
+    candidate = plan(generation=2, base=1, vless=None, awg_config=awg_profile(), awg_dns={
+        'address': '1.1.1.1', 'server_name': 'cloudflare-dns.com',
+    })
+    assert exchange(agent, 'stage', candidate).ok
+    runtime.dns_failure = True
+    assert not exchange(agent, 'apply', candidate).ok
+    assert runtime.active == old.config_bytes() and runtime.dns is None
+    assert agent._status().last_known_good_generation == 1
+
+
+def test_awg_dns_runtime_drift_marks_unavailable():
+    from app.network_agent.xray_agent import XrayRecord
+
+    class MemoryJournal:
+        record = XrayRecord()
+
+        def read(self):
+            return self.record
+
+        def write(self, record):
+            self.record = record
+
+    runtime = Runtime()
+    restarted = make_agent(runtime, MemoryJournal())
+    candidate = plan(vless=None, awg_config=awg_profile(), awg_dns={
+        'address': '1.1.1.1', 'server_name': 'cloudflare-dns.com',
+    })
+    apply(restarted, candidate)
+    runtime.dns = None
+    assert exchange(restarted, 'read_status').result.egress_state == 'unavailable'
+
+
+def test_sing_box_accepts_generated_awg_dns(tmp_path):
+    binary = os.environ.get('TEMPEST_TEST_SING_BOX')
+    if not binary:
+        pytest.skip('TEMPEST_TEST_SING_BOX not supplied')
+    profile = plan(vless=None, awg_config=awg_profile(), awg_dns={
+        'address': '1.1.1.1', 'server_name': 'cloudflare-dns.com',
+    })
+    candidate = tmp_path / 'dns.json'
+    candidate.write_bytes(profile.awg_dns_bytes())
+    check = subprocess.run([binary, 'check', '-c', str(candidate)], capture_output=True, timeout=5)
+    assert check.returncode == 0
 
 
 def test_awg_apply_rollback_and_restart_preserve_vless_lkg(state_dir):
@@ -353,7 +499,9 @@ def test_pinned_xray_accepts_generated_config(tmp_path):
         pytest.skip("TEMPEST_TEST_XRAY not supplied")
     target = tmp_path / "candidate.json"
     tls = plan()
-    variants = [("TLS", tls), ("AWG SOCKS", plan(vless=None, awg_config=awg_profile(), default_egress="vpn"))]
+    variants = [("TLS", tls), ("AWG SOCKS", plan(vless=None, awg_config=awg_profile(), default_egress="vpn")),
+                ("AWG DNS adapter", plan(vless=None, awg_config=awg_profile(), awg_dns={
+                    "address": "1.1.1.1", "server_name": "cloudflare-dns.com"}))]
     common = tls.vless.model_dump(mode="json", exclude={"certificate_sha256"})
     public_key = base64.urlsafe_b64encode(bytes(range(1, 33))).decode().rstrip("=")
     for fingerprint in ("chrome", "firefox", "safari", "ios", "edge"):

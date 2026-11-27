@@ -12,6 +12,7 @@ from pydantic import Field, IPvAnyAddress, IPvAnyInterface, IPvAnyNetwork, Secre
 
 from app.core.uri_parser import _parse_vless
 from app.network_agent.models import AgentStatus, ContractModel
+from app.network_agent.awg_dns import AwgDns
 from app.network_agent.xray_profile import (
     MAX_PEERS, MAX_RULES, DestinationRule, ProbePolicy, VlessEgress, VlessReality, VlessSecurity, WireGuardKey, WireGuardPeer, XrayPlan,
 )
@@ -30,6 +31,7 @@ class Deployment(ContractModel):
     private_key: WireGuardKey = Field(repr=False)
     probe: ProbePolicy
     resolvers: tuple[IPvAnyAddress, ...] = Field(min_length=1, max_length=2)
+    awg_dns: AwgDns | None = None
 
     @model_validator(mode="after")
     def validate_pools(self) -> "Deployment":
@@ -61,6 +63,7 @@ class Deployment(ContractModel):
             probe=self.probe,
             vless=vless,
             awg_config=awg_config,
+            awg_dns=self.awg_dns if awg_config is not None else None,
             egress_id=draft.selected_egress_id,
             resolvers=self.resolvers,
             rules=draft.rules,

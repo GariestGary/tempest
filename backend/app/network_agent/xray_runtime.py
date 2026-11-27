@@ -12,7 +12,10 @@ READINESS_SECONDS = 45.0
 XRAY_UNIT = "tempest-xray.service"
 PROBE_UNIT = "tempest-xray-probe.service"
 AWG_UNIT = "tempest-awgproxy.service"
+DNS_UNIT = "tempest-awg-dns.service"
 AWG_BINARY = Path("/opt/tempest/bin/awgproxy")
+DNS_BINARY = Path("/opt/tempest/bin/sing-box")
+DNS_AMD64_SHA256 = "fc9c6e6ab345f045b16a0ed10d1ff28d68e8e56e7749fca30738d1406e98d7b8"
 AWG_AMD64_SHA256 = "e0fe256ad362221026a15a372a246b21026b0405e4dc32ab8f2c87c92543686e"
 XRAY_AMD64_SHA256 = "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1"
 
@@ -31,6 +34,8 @@ class SystemdXray:
         self._namespace = Path("/run/netns", namespace)
         self._active = directory / "active.json"
         self._awg_active = directory / "active-awg.conf"
+        self._dns_active = directory / "active-awg-dns.json"
+        self._dns_invocation = None
         self._awg_invocation = None
         self._check_namespace()
         info = directory.stat(follow_symlinks=False)
@@ -121,6 +126,21 @@ class SystemdXray:
         except OSError as exc:
             raise XrayRuntimeError("AWG binary or private configuration unavailable") from exc
 
+    def validate_dns(self, payload: bytes) -> None:
+        try:
+            info = DNS_BINARY.stat(follow_symlinks=False)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise XrayRuntimeError("DNS adapter binary is not protected")
+            with DNS_BINARY.open("rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != DNS_AMD64_SHA256:
+                    raise XrayRuntimeError("DNS adapter checksum mismatch")
+            with tempfile.NamedTemporaryFile(suffix=".json", dir=self._state_directory) as candidate:
+                candidate.write(payload)
+                candidate.flush()
+                self._run([str(DNS_BINARY), "check", "-c", candidate.name], "DNS adapter rejected the candidate")
+        except OSError as exc:
+            raise XrayRuntimeError("DNS adapter or private configuration unavailable") from exc
+
     def _identity(self, unit: str = XRAY_UNIT) -> str | None:
         properties = dict(line.split("=", 1) for line in self._systemctl(
             "show", unit, "--property=ActiveState,MainPID,InvocationID", output=True,
@@ -138,6 +158,12 @@ class SystemdXray:
         if self._identity() is not None:
             raise XrayRuntimeError("Xray ingress did not stop")
         self._active.unlink(missing_ok=True)
+        if os.path.lexists(self._dns_active) or self._dns_invocation is not None:
+            self._systemctl("stop", DNS_UNIT)
+            if self._identity(DNS_UNIT) is not None:
+                raise XrayRuntimeError("DNS adapter unit did not stop")
+            self._dns_active.unlink(missing_ok=True)
+            self._dns_invocation = None
         if os.path.lexists(self._awg_active) or self._awg_invocation is not None:
             self._systemctl("stop", AWG_UNIT)
             if self._identity(AWG_UNIT) is not None:
@@ -153,6 +179,20 @@ class SystemdXray:
         self._awg_invocation = self._identity(AWG_UNIT)
         if self._awg_invocation is None:
             raise XrayRuntimeError("AWG unit did not start")
+
+    def activate_dns(self, payload: bytes) -> None:
+        self._check_namespace()
+        self._install(self._dns_active, payload)
+        self._systemctl("start", DNS_UNIT)
+        self._dns_invocation = self._identity(DNS_UNIT)
+        if self._dns_invocation is None:
+            raise XrayRuntimeError("DNS adapter unit did not start")
+
+    def assert_dns(self, payload: bytes) -> None:
+        self._check_namespace()
+        if (self._dns_invocation is None or self._identity(DNS_UNIT) != self._dns_invocation
+                or self._dns_active.read_bytes() != payload):
+            raise XrayRuntimeError("DNS adapter runtime differs from the expected generation")
 
     def assert_awg(self, payload: bytes) -> None:
         self._check_namespace()

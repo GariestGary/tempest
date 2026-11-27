@@ -24,6 +24,15 @@ def dns(transport):
         return False
 
 
+def dnskey_tcp():
+    result = command('dig', '-r', '@198.51.100.53', '.', 'DNSKEY', '+tcp', '+dnssec',
+                     '+timeout=2', '+tries=1', '+noall', '+comments', '+answer', '+stats')
+    if result is None or result.returncode:
+        return False
+    flags = re.search(r'flags:\s*([^;]+);', result.stdout)
+    size = re.search(r'MSG SIZE\s+rcvd:\s*(\d+)', result.stdout)
+    return bool(flags and 'tc' not in flags.group(1).split() and size and int(size.group(1)) > 512
+                and re.search(r'\bDNSKEY\b', result.stdout) and 'status: NOERROR' in result.stdout)
 def vpn_https():
     result = command('curl', '-fsS', '--noproxy', '*', '--connect-timeout', '2', '--max-time', '3',
                      '--resolve', 'cloudflare-dns.com:443:1.1.1.1',
@@ -50,8 +59,11 @@ def legacy_or_awg():
     with ThreadPoolExecutor(max_workers=4) as pool:
         checks = [pool.submit(dns, '+tcp'), pool.submit(dns, '+notcp'),
                   pool.submit(vpn_https), pool.submit(fixture_controls)]
+        adapter = command('systemctl', 'is-active', '--quiet', 'tempest-awg-dns.service', timeout=2)
+        if adapter is not None and adapter.returncode == 0:
+            checks.append(pool.submit(dnskey_tcp))
         results = [check.result() for check in checks]
-        print('AWG checks (DNS TCP, DNS UDP, HTTPS, DIRECT/BLOCK):',
+        print('AWG checks (DNS TCP, DNS UDP, HTTPS, DIRECT/BLOCK, optional DNSKEY):',
               *('pass' if result else 'fail' for result in results), flush=True)
         return all(results)
 
