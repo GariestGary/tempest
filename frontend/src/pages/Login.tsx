@@ -1,9 +1,12 @@
 import { useState, FormEvent } from 'react'
+import { ShieldCheck, LockKeyhole } from 'lucide-react'
+import './working-core.css'
 import { authApi } from '@/api/client'
 import { useT } from '@/hooks/useT'
 
 export function Login() {
-  const t = useT()
+  const translate = useT()
+  const t = (english: string, russian: string) => import.meta.env.VITE_WORKING_CORE === '1' ? russian : translate(english, russian)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -25,11 +28,11 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-5">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-100">TEMPEST</h1>
-          <p className="text-sm text-gray-500 mt-1">{t('Sign in to manage your proxy', 'Войдите для управления прокси')}</p>
+    <div className="wc-login"><div className="wc-login-brand"><span className="wc-logo"><ShieldCheck size={21}/></span><strong>TEMPEST</strong><span> / VPN GATEWAY</span></div>
+      <form onSubmit={handleSubmit} className="wc-login-card space-y-5">
+        <div className="wc-login-intro"><span className="wc-login-icon"><LockKeyhole size={21}/></span>
+          <h1>{t('Welcome back', 'Вход в TEMPEST')}</h1>
+          <p>{t('Sign in to manage your gateway', 'Войдите в панель управления шлюзом')}</p>
         </div>
 
         {error && (
@@ -40,7 +43,7 @@ export function Login() {
 
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-gray-500 mb-1.5">{t('Username', 'Имя пользователя')}</label>
+            <label className="block text-sm text-gray-300 mb-1.5">{t('Username', 'Имя пользователя')}</label>
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -50,7 +53,7 @@ export function Login() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1.5">{t('Password', 'Пароль')}</label>
+            <label className="block text-sm text-gray-300 mb-1.5">{t('Password', 'Пароль')}</label>
             <input
               type="password"
               value={password}
