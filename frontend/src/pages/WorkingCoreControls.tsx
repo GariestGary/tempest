@@ -1,6 +1,6 @@
 import { Children, isValidElement, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, MoreHorizontal } from 'lucide-react'
+import { Check, ChevronDown, MoreHorizontal, Plus } from 'lucide-react'
 
 type OptionProps = { value?: string; disabled?: boolean; children?: ReactNode }
 type SelectProps = {
@@ -85,7 +85,7 @@ export function Select({ children, name, value, defaultValue, disabled, required
 }
 
 type MenuAction = { label: string; disabled?: boolean; danger?: boolean; onSelect: () => void }
-export function ActionMenu({ label, actions }: { label: string; actions: MenuAction[] }) {
+export function ActionMenu({ label, actions, text }: { label: string; actions: MenuAction[]; text?: string }) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0 })
   const trigger = useRef<HTMLButtonElement>(null)
@@ -100,7 +100,7 @@ export function ActionMenu({ label, actions }: { label: string; actions: MenuAct
     document.addEventListener('pointerdown', outside); window.addEventListener('scroll', close, true); window.addEventListener('resize', close)
     return () => { document.removeEventListener('pointerdown', outside); window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close) }
   }, [open])
-  return <><button ref={trigger} type="button" className="wc-menu-trigger" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => open ? setOpen(false) : show()}><MoreHorizontal size={19}/></button>
+  return <><button ref={trigger} type="button" className={text ? 'wc-action-trigger' : 'wc-menu-trigger'} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => open ? setOpen(false) : show()}>{text ? <><Plus size={16}/>{text}<ChevronDown size={14}/></> : <MoreHorizontal size={19}/>}</button>
     {open && createPortal(<div ref={menu} role="menu" aria-label={label} className="wc-popover wc-menu-popover" style={{ position: 'fixed', ...position }} onKeyDown={event => {
       if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); trigger.current?.focus() }
       if (event.key === 'Tab') setOpen(false)

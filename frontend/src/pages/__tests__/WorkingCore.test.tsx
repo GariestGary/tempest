@@ -14,6 +14,28 @@ vi.mock('@/api/client', () => ({
 }))
 
 describe('Working Core panel', () => {
+  it('filters the combined catalog and previews changes from another section', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 4, vless: null, clients: [], rules: [], resolvers: [],
+      providers: [{ id: 'p1', name: 'Provider' }], selected_egress_id: 'a1',
+      saved_awg_egresses: [{ id: 'a1', name: 'AWG exit', provider_id: 'p1' }],
+      saved_egresses: [{ id: 'v1', name: 'VLESS exit', provider_id: null }],
+      agent: { active_generation: 7, last_known_good_generation: 7, pending_generation_id: null },
+    } })
+    vi.mocked(http.post).mockReset().mockResolvedValue({ data: { revision: 4, base_generation: 7, sections: ['vless'] } })
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    await screen.findByRole('button', { name: 'Добавить выход' })
+    fireEvent.click(screen.getByRole('button', { name: 'Выходы' }))
+    const catalog = within(screen.getByRole('region', { name: 'Каталог выходов' }))
+    expect(catalog.getByText('VLESS exit')).toBeInTheDocument()
+    choose('Фильтр по протоколу', 'VLESS')
+    expect(catalog.queryByText('AWG exit')).toBeNull()
+    expect(catalog.getByText('VLESS exit')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить изменения' }))
+    expect(await screen.findByText('Есть изменения для применения')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Применить конфигурацию' })).toBeEnabled()
+    expect(http.post).toHaveBeenCalledWith('/core/preview')
+  })
   it('does not delete an exit when its confirmation is cancelled', async () => {
     vi.mocked(http.get).mockResolvedValue({ data: {
       revision: 4, vless: null, clients: [], rules: [], resolvers: [], agent: null,
@@ -43,7 +65,8 @@ describe('Working Core panel', () => {
       } })
       .mockResolvedValueOnce({ data: { added: 1 } })
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
-    fireEvent.click(await screen.findByText('Импорт подписки VLESS'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Добавить выход' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Импорт подписки' }))
     choose('Провайдер для импорта', 'VPS')
     const source = screen.getByLabelText('Содержимое подписки')
     fireEvent.change(source, { target: { value: 'fixture-subscription-content' } })
@@ -57,7 +80,7 @@ describe('Working Core panel', () => {
     expect(screen.getByText(/Строка 2 · Дубликат/)).toBeInTheDocument()
     await waitFor(() => expect(confirm).toBeEnabled())
     fireEvent.click(confirm)
-    expect(await screen.findByText('Выходов добавлено в каталог: 1.')).toBeInTheDocument()
+    expect(await within(screen.getByRole('dialog', { name: 'Импорт подписки VLESS' })).findByText('Выходов добавлено в каталог: 1.')).toBeInTheDocument()
     expect(http.post).toHaveBeenLastCalledWith('/core/providers/provider-1/subscription/commit', {
       revision: 7, preview_id: 'preview-1',
     })
@@ -71,7 +94,8 @@ describe('Working Core panel', () => {
     } })
     vi.mocked(http.post).mockReset().mockResolvedValue({ data: { id: 'new-exit' } })
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
-    fireEvent.click(await screen.findByRole('button', { name: 'Добавить VLESS в каталог' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Добавить выход' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Добавить VLESS' }))
     const mode = await screen.findByRole('combobox', { name: 'Способ добавления выхода' })
     const form = within(mode.closest('form')!)
     choose('Способ добавления выхода', 'Ручной ввод')
