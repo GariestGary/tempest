@@ -157,3 +157,36 @@ def test_probe_echo_fixture_real_loopback_tcp_and_udp(monkeypatch):
     finally:
         fixture.terminate()
         fixture.communicate(timeout=3)
+
+
+@pytest.mark.parametrize("reply, expected", [
+    (b'', True),
+    (ConnectionResetError(), True),
+    (BrokenPipeError(), True),
+    (TimeoutError(), True),
+    (b'TEMPEST-response', False),
+    (b'X', False),
+    (OSError(), False),
+])
+def test_block_tcp_termination(monkeypatch, reply, expected):
+    probe = load('probe_tcp_termination', 'working-core-probe.py')
+    monkeypatch.setattr(probe, 'route_is', lambda *args: True)
+
+    class Client:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def settimeout(self, value): pass
+        def bind(self, value): pass
+        def connect(self, value): pass
+        def sendall(self, value): pass
+        def recv(self, size):
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+    monkeypatch.setattr(probe.socket, 'socket', lambda *args: Client())
+    target = {'address': '10.245.249.1', 'port': 18081}
+
+    assert probe.echo(
+        target, '10.245.248.2', 'wg0', 'tcp', '', blocked=True
+    ) is expected

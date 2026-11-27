@@ -116,6 +116,13 @@ def echo(target, source, interface, protocol, expected, *, blocked=False):
             client.settimeout(TIMEOUT)
             client.bind((source, 0))
             client.connect((target['address'], target['port']))
+            if blocked and protocol == 'tcp':
+                try:
+                    client.sendall(marker)
+                    return client.recv(1) == b''
+                except (ConnectionResetError, BrokenPipeError):
+                    return True
+
             client.sendall(marker)
             if protocol == 'tcp':
                 with client.makefile('rb') as stream:
