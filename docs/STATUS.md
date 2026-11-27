@@ -1,5 +1,23 @@
 # TEMPEST — статус форка
 
+## 2026-11-27 · DoT fault / rollback
+
+Владелец принял DNSKEY через реальную AWG-подписку. На DoT generation 37 остановка DNS unit, AWG и имитация недоступного DoT не дали DNS TCP/UDP fallback; разрешённый DIRECT и BLOCK сохранились, capture разрешённых внешних интерфейсов DNS/DoT — 0 пакетов без потерь. Отдельная остановка AWG блокировала HTTPS/UDP и не показала прямого HTTPS fallback к тестовому endpoint. Recovery и pending rollback сохранили LKG и отзывы. Подмена недоступного DoT адреса — имитация, не отказ настоящего upstream; поведение ранее отозванных peers повторным handshake не проверялось. См. [HANDOFF](HANDOFF.md).
+
+На Linux: штатный backend 154 passed; AWG/DNS targeted 41 passed / 2 skipped (не заданы test binaries); frontend на Node 20 — 147 passed, lint и build pass. Первоначальный запуск на системном Node 26 дал 6 ошибок localStorage, повтор на предусмотренном Node 20 прошёл. До функциональной проверки внешнего клиента/UDP ingress, упаковки и лицензионной проверки сохраняются ограничения. Реальный relay-free путь требует сетевой перестройки и не запускался. VORTEX не изменялся.
+
+## 2026-11-27 · сравнительная серия AWG
+
+Прямой AWG SOCKS: 5/5 аутентификаций, HTTPS, UDP и DoT, но HTTPS до 4,75 с и DoT до 7,34 с. После штатного подтверждения DoT generation 35 полная цепочка дала 5/5 HTTPS, DNS A TCP/UDP и DNSKEY TCP; UDP NTP — 4/5, один таймаут. Relay активен, без рестартов и сообщений за период, однако его счётчиков потерь нет. Медленный участок уже виден при прямом SOCKS, точная причина и место единственного UDP timeout не установлены; сопоставимые проверки были последовательными. Прежняя конфигурация возвращена как LKG 36, отозванные ключи сохранены. Результаты и ограничения — [HANDOFF](HANDOFF.md). DNS-адаптер и verifier не изменялись; CI/CodeQL не запускались, VORTEX не изменялся.
+
+## 2026-11-27 · AWG DoT и изоляция
+
+Владелец разрешил `AF_NETLINK` только DNS unit; официальный sing-box запускается с прежними UID, нулевыми capabilities, NoNewPrivileges, seccomp и namespace. Generation 32 подтверждён с полноценным DNSKEY через AWG, но отдельные повторы DNS выявили нестабильность. Выполнен штатный возврат прежнего профиля как LKG 33 с сохранением отзывов; повторный DoT apply отклонён verifier и вернулся к LKG 33. Причина нестабильности не установлена; fault/leak/recovery для устойчивого DoT остаются `NOT_RUN`. Подробности — [HANDOFF](HANDOFF.md). Linux quick: 78 passed; targeted Agent/verifier: 26 passed / 2 skipped (не заданы test binaries sing-box и Xray). Исходный запуск quick в sandbox заблокировал AF_UNIX, повтор вне sandbox прошёл. SHA `ea063e597864f3d4621d86680fd31fe7285346a4` с незакоммиченными изменениями; CI/CodeQL не запускались. VORTEX не изменялся.
+
+# 2026-11-27 · реальная проверка AWG DoT
+После reboot подтверждены active/LKG 29 и три сохранённых отзыва, pending отсутствовал. Установлены согласованные компоненты sing-box и обновлённый verifier; пользователь выбрал Cloudflare DoT. Штатный `/core/apply` вернул HTTP 409: sing-box 1.14.2 не запускается в действующем sandbox, поскольку попытка создать netlink-сокет отклонена `RestrictAddressFamilies`. На прежнее active/LKG 29 выполнен штатный rollback, отзывы сохранились; verifier прежнего пути прошёл TCP/UDP A, HTTPS и DIRECT/BLOCK. Полноценный DNSKEY и последующие fault/leak/recovery испытания нового поколения — **NOT_RUN**. Sandbox не ослаблялся; подробности и закрытые артефакты — [HANDOFF](HANDOFF.md). SHA checkout `ea063e597864f3d4621d86680fd31fe7285346a4`; CI/CodeQL в этой попытке не запускались. VORTEX не изменялся.
+
+
 > 2026-11-26: владелец принял A `ACCEPTED_WITH_LIMITATIONS` на `93feeab084e2a66e1371e7f503baede6d1f32c6d`. Записи ниже исторические; внешний клиент и UDP ingress проверяются при первом практическом подключении. Текущий приоритет — AWG egress, см. [roadmap](PROJECT_SPEC.md#15-действующий-roadmap).
 
 ## 2026-11-27 · AWG DNS adapter — WIP
