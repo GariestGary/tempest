@@ -4,11 +4,31 @@ import { describe, expect, it, vi } from 'vitest'
 import { http } from '@/api/client'
 import { WorkingCore } from '@/pages/WorkingCore'
 
+function choose(label: string, option: string) {
+  fireEvent.click(screen.getByRole('combobox', { name: label }))
+  fireEvent.click(screen.getByRole('option', { name: option }))
+}
+
 vi.mock('@/api/client', () => ({
-  http: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
+  http: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }))
 
 describe('Working Core panel', () => {
+  it('does not delete an exit when its confirmation is cancelled', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 4, vless: null, clients: [], rules: [], resolvers: [], agent: null,
+      providers: [], saved_egresses: [{ id: 'e1', name: 'Test', provider_id: null }], selected_egress_id: null,
+    } })
+    vi.mocked(http.delete).mockReset()
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Действия выхода Test' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Удалить выход?' })
+    expect(http.delete).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Отмена' }))
+    expect(screen.queryByRole('dialog', { name: 'Удалить выход?' })).toBeNull()
+    expect(http.delete).not.toHaveBeenCalled()
+  })
   it('previews subscription results and only adds exits after explicit confirmation', async () => {
     vi.mocked(http.get).mockResolvedValue({ data: {
       revision: 7, vless: null, clients: [], rules: [], resolvers: [], agent: null,
@@ -24,7 +44,7 @@ describe('Working Core panel', () => {
       .mockResolvedValueOnce({ data: { added: 1 } })
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
     fireEvent.click(await screen.findByText('Импорт подписки VLESS'))
-    fireEvent.change(screen.getByLabelText('Провайдер для импорта'), { target: { value: 'provider-1' } })
+    choose('Провайдер для импорта', 'VPS')
     const source = screen.getByLabelText('Содержимое подписки')
     fireEvent.change(source, { target: { value: 'fixture-subscription-content' } })
     fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр подписки' }))
@@ -52,24 +72,24 @@ describe('Working Core panel', () => {
     vi.mocked(http.post).mockReset().mockResolvedValue({ data: { id: 'new-exit' } })
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
     fireEvent.click(await screen.findByRole('button', { name: 'Добавить VLESS в каталог' }))
-    const mode = await screen.findByLabelText('Способ добавления выхода')
+    const mode = await screen.findByRole('combobox', { name: 'Способ добавления выхода' })
     const form = within(mode.closest('form')!)
-    fireEvent.change(mode, { target: { value: 'manual' } })
-    fireEvent.change(form.getByLabelText('Защита VLESS'), { target: { value: 'reality' } })
+    choose('Способ добавления выхода', 'Ручной ввод')
+    choose('Защита VLESS', 'TCP/Reality')
     const values = {
       Название: 'Test exit',
-      Провайдер: 'provider-1',
       'IP выхода': '192.0.2.20',
       'Имя сервера (SNI)': 'egress.example.test',
       'UUID клиента': 'manual-test-id',
       'Публичный ключ Reality': 'B'.repeat(43),
       'Short ID (если задан)': 'aabb',
-      Fingerprint: 'firefox',
-      Flow: 'xtls-rprx-vision',
     }
     for (const [label, value] of Object.entries(values)) {
       fireEvent.change(form.getByLabelText(label, { exact: true }), { target: { value } })
     }
+    choose('Провайдер', 'VPS')
+    choose('Fingerprint', 'firefox')
+    choose('Flow', 'xtls-rprx-vision')
     fireEvent.click(form.getByRole('button', { name: 'Сохранить выход' }))
     await waitFor(() => expect(http.post).toHaveBeenCalledExactlyOnceWith('/core/egresses', {
       revision: 4, name: 'Test exit', provider_id: 'provider-1',
@@ -89,7 +109,8 @@ describe('Working Core panel', () => {
     vi.mocked(http.put).mockReset().mockResolvedValue({ data: null })
     vi.mocked(http.post).mockReset()
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
-    fireEvent.change(await screen.findByLabelText('Провайдер выхода «Amsterdam»'), { target: { value: 'provider-1' } })
+    await screen.findByRole('combobox', { name: 'Провайдер выхода «Amsterdam»' })
+    choose('Провайдер выхода «Amsterdam»', 'VPS')
     await waitFor(() => expect(http.put).toHaveBeenCalledWith('/core/egresses/exit-1/provider', { revision: 4, provider_id: 'provider-1' }))
     expect(http.post).not.toHaveBeenCalled()
   })
@@ -101,7 +122,8 @@ describe('Working Core panel', () => {
     } })
     vi.mocked(http.post).mockReset().mockResolvedValue({ data: null })
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
-    fireEvent.click(await screen.findByRole('button', { name: 'Выбрать' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Действия выхода VPS NL' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Выбрать' }))
     await waitFor(() => expect(http.post).toHaveBeenCalledWith('/core/egresses/nl-id/select', { revision: 9 }))
     expect(http.post).toHaveBeenCalledTimes(1)
     expect(await screen.findByText('Выход выбран в черновике. Проверьте и примените изменения.')).toBeInTheDocument()
