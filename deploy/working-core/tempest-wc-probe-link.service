@@ -1,0 +1,11 @@
+[Unit]
+Description=TEMPEST WireGuard verification peer
+BindsTo=tempest-wc-network.service
+After=tempest-wc-network.service
+PartOf=tempest-wc-network.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/tempest/bin/working-core-probe-link.sh --create
+ExecStop=/opt/tempest/bin/working-core-probe-link.sh --remove

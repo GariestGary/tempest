@@ -1,5 +1,19 @@
 # TEMPEST — статус форка
 
+## 2026-11-27 · ручное развёртывание и локальная сверка
+
+По сообщению владельца Working Core вручную запущен на VORTEX: Agent, namespaces, firewall, NAT, WG probe, API, панель и авторизация работают; AWG apply не проверен. Локально сверены выгруженные firewall/network/probe scripts: firewall получил явные UDP для DNAT и conntrack, остальные два совпали. Задокументированы точечное AppArmor-разрешение, права и предупреждение startup. Добавлены экспорт публичного build context с нормализованными правами и ожидание connectable Unix-сокета Agent; их локальные тесты прошли. Чистая установка, применение скриптов и безопасный network rollback не проверены; probe deletion по имени требует проверки принадлежности. Новых изменений VORTEX не выполнялось.
+
+Локально на Linux: `tests/deploy` 13 passed и `local-check.sh quick` 78 passed вне sandbox (внутри sandbox создание loopback/Unix-сокетов отклонено); Bash syntax и `git diff --check` прошли. Это не проверка применённых firewall-правил или поведения на VORTEX. CI/CodeQL не запускались.
+
+Открытый технический долг: подтверждать принадлежность probe interface перед удалением; проверить частичное создание, namespace identity и rollback при ошибках и рестарте в разрешённой disposable VM. До закрытия этих задач не считать production installer и сетевой rollback принятыми. Исправление сети не является блокером редизайна Web UI.
+
+## 2026-11-27 · замена старого TEMPEST на VORTEX — подготовка
+
+Владелец принял функциональный checkpoint `92fec95a5f1057cbe74066e671f855d5daad6856` с лабораторными ограничениями и изменил цель с параллельного развёртывания на замену. VORTEX исследован только read-only, включая предоставленные владельцем sudo-отчёты. Старый `vortex-panel` занимает 9080, старый `wg-clients` — UDP 51820 внутри общего sing-box. Другие sing-box inbounds/rules зависят в том числе от `tempest-vless-xray.service`, поэтому их нельзя автоматически отключать. Архив/остановка и точечный diff описаны в [инвентаризации](VORTEX_LEGACY_INVENTORY.md).
+
+Подготовлены локальные проверки коллизий, генератор безопасного черновика удаления только `wg-clients`, pinned binary fetch/stage/install steps, lock Python 3.11 и 60-wheel manifest, candidate production verifier с независимым BLOCK control и отдельная fixture. Официальные Xray/sing-box проверены и скачаны локально; awgproxy повторно собран с совпавшим hash, wheelhouse скачан с проверкой 60 хэшей; stage не включает внешний sing-box. Локальные tests 7 passed, Bash syntax и Compose config на VORTEX read-only pass. **Полный installer, чистая установка Python, production network provisioning и verifier в реальном трафике ещё не проверены; ресурсы старого TEMPEST полностью не классифицированы.** До конкретного согласования VORTEX остаётся read-only. План: [FIRST_VORTEX_DEPLOYMENT](FIRST_VORTEX_DEPLOYMENT.md).
+
 ## 2026-11-27 · DoT fault / rollback
 
 Владелец принял DNSKEY через реальную AWG-подписку. На DoT generation 37 остановка DNS unit, AWG и имитация недоступного DoT не дали DNS TCP/UDP fallback; разрешённый DIRECT и BLOCK сохранились, capture разрешённых внешних интерфейсов DNS/DoT — 0 пакетов без потерь. Отдельная остановка AWG блокировала HTTPS/UDP и не показала прямого HTTPS fallback к тестовому endpoint. Recovery и pending rollback сохранили LKG и отзывы. Подмена недоступного DoT адреса — имитация, не отказ настоящего upstream; поведение ранее отозванных peers повторным handshake не проверялось. См. [HANDOFF](HANDOFF.md).

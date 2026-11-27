@@ -1,0 +1,23 @@
+module	version	file	sha256
+github.com/MakeNowJust/heredoc/v2	v2.0.1	github.com__MakeNowJust__heredoc__v2@v2.0.1/LICENSE	3cf06d7751ecd37a2822b9fa6ca09510436c0abbfdf3c6261f59c0f0a7f92fe3
+github.com/akamensky/argparse	v1.4.0	github.com__akamensky__argparse@v1.4.0/LICENSE	a44a68d10a668a3df47c40945b17c9acbbc301a4edb12a015b781b608b6651f1
+github.com/amnezia-vpn/amneziawg-go/v3	v3.1.20260828	github.com__amnezia-vpn__amneziawg-go__v3@v3.1.20260828/LICENSE	9ec168d1f4af53f293be8bd2e882588f0e35af0334292d4ca4e5ede84408420e
+github.com/google/btree	v1.1.3	github.com__google__btree@v1.1.3/LICENSE	cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+github.com/landlock-lsm/go-landlock	v0.10.1	github.com__landlock-lsm__go-landlock@v0.10.1/LICENSE	611f2b892bfaa050cd3ceee982c32687b194ef8ce32295a22943da780d329650
+github.com/things-go/go-socks5	v0.1.3	github.com__things-go__go-socks5@v0.1.3/LICENSE	831892cd31b9eef0311bb1de9014527ef5d3592eed7add1f9f829510d2065e62
+golang.org/x/crypto	v0.58.0	golang.org__x__crypto@v0.58.0/PATENTS	96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc
+golang.org/x/crypto	v0.58.0	golang.org__x__crypto@v0.58.0/LICENSE	911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
+golang.org/x/exp	v0.0.0-20261014143641-f0251eb4aa3e	golang.org__x__exp@v0.0.0-20261014143641-f0251eb4aa3e/PATENTS	96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc
+golang.org/x/exp	v0.0.0-20261014143641-f0251eb4aa3e	golang.org__x__exp@v0.0.0-20261014143641-f0251eb4aa3e/LICENSE	911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
+golang.org/x/net	v0.61.0	golang.org__x__net@v0.61.0/PATENTS	96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc
+golang.org/x/net	v0.61.0	golang.org__x__net@v0.61.0/LICENSE	911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
+golang.org/x/sys	v0.49.0	golang.org__x__sys@v0.49.0/PATENTS	96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc
+golang.org/x/sys	v0.49.0	golang.org__x__sys@v0.49.0/LICENSE	911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
+golang.org/x/time	v0.16.0	golang.org__x__time@v0.16.0/PATENTS	96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc
+golang.org/x/time	v0.16.0	golang.org__x__time@v0.16.0/LICENSE	911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
+gopkg.in/ini.v1	v1.67.3	gopkg.in__ini.v1@v1.67.3/LICENSE	f6918bd93ffe07f4b2c61b8287c32cb3122e08aed0be50f1c7d0eddc87877a8f
+gvisor.dev/gvisor	v0.0.0-20261022113022-1f0a42d8e820	gvisor.dev__gvisor@v0.0.0-20261022113022-1f0a42d8e820/LICENSE	0fbab5c58efbdf6d31e8085214f2dd821659c03d73cff3ed2b08e98826ea1cd9
+kernel.org/pub/linux/libs/security/libcap/psx	v1.2.78	kernel.org__pub__linux__libs__security__libcap__psx@v1.2.78/License	279fa656c62857d42952b86a0789b98669ca1cb4b324a8d9e91397c174af4c14
+suah.dev/protect	v1.2.4	suah.dev__protect@v1.2.4/LICENSE	43f42375fc0963cec1a041ae3a69e9a5803dceb20d513889d2d153bc12de408e
+Go standard library	1.27.3	go-standard-library@1.27.3/LICENSE	911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
+Go standard library	1.27.3	go-standard-library@1.27.3/PATENTS	96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc

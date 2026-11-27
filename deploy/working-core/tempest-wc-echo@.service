@@ -1,0 +1,23 @@
+[Unit]
+Description=TEMPEST local verification fixture %i
+BindsTo=tempest-wc-network.service tempest-wc-firewall.service
+After=tempest-wc-network.service tempest-wc-firewall.service
+PartOf=tempest-wc-network.service
+
+[Service]
+Type=exec
+User=tempest-xray-probe
+ExecStart=/usr/bin/python3 /opt/tempest/bin/working-core-echo.py --listen 10.245.249.1 --port %i --allow 10.245.249.2 --allow 10.245.249.10
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_UNIX

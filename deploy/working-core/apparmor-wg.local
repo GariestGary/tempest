@@ -1,0 +1,2 @@
+# Include in /etc/apparmor.d/local/wg; do not disable the wg profile.
+/etc/tempest/working-core-probe.key r,

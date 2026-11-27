@@ -1,0 +1,5 @@
+# Подготовка отдельного Working Core
+
+`vortex.compose.yml` — только overlay панели/API с отдельной проверенной на момент инвентаризации подсетью. Целевой порт панели — `127.0.0.1:9080`, который сейчас занят старой панелью и может быть использован только после её согласованной остановки. Overlay применяют вместе с корневым `docker-compose.working-core.yml`, `TEMPEST_PANEL_PORT=9080`, `TEMPEST_CORE_PRIVATE_DIR=/var/lib/tempest-core-private` и фактическим GID группы сокета. Он не создаёт dataplane, namespace, UDP ingress или traffic verifier и не является готовым установщиком. Перед запуском повторить проверку `scripts/deploy/vortex-readiness.py`; создание Docker bridge и публикация порта требуют утверждённого плана scoped сетевых изменений. Существующее `/etc/tempest/amnezia` не менять.
+
+Сценарий `scripts/deploy/stage-runtime.sh` проверяет три локально предоставленных бинарника и готовит закрытый локальный stage Xray и awgproxy, но **не устанавливает** службы и не копирует внешний sing-box. Полные инструкции и оставшиеся блокеры: [план первого развёртывания](../../docs/FIRST_VORTEX_DEPLOYMENT.md), [лицензии](../../docs/THIRD_PARTY_NOTICES.md).

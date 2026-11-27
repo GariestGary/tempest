@@ -1,0 +1,12 @@
+[Unit]
+Description=TEMPEST scoped firewall and NAT
+Requires=docker.service
+BindsTo=tempest-wc-network.service
+After=docker.service tempest-wc-network.service
+PartOf=tempest-wc-network.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/tempest/bin/working-core-firewall.sh --create
+ExecStop=/opt/tempest/bin/working-core-firewall.sh --remove

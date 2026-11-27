@@ -1,0 +1,13 @@
+[Unit]
+Description=TEMPEST network topology
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/tempest/bin/working-core-network.sh --create
+ExecStop=/opt/tempest/bin/working-core-network.sh --remove
+
+[Install]
+WantedBy=multi-user.target

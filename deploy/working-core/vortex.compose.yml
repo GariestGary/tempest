@@ -1,0 +1,18 @@
+# Overlay for docker-compose.working-core.yml; does not provision the gateway.
+# Requires a separately reviewed ingress/egress network namespace and verifier.
+services:
+  panel:
+    networks:
+      default: {}
+      caddy-proxy:
+        aliases:
+          - tempest-working-core-web
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.244.247.0/24
+  caddy-proxy:
+    name: proxy
+    external: true
