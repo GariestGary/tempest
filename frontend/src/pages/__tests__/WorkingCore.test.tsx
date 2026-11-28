@@ -21,6 +21,7 @@ describe('Working Core panel', () => {
       saved_awg_egresses: [{ id: 'a1', name: 'AWG exit', provider_id: 'p1' }],
       saved_egresses: [{ id: 'v1', name: 'VLESS exit', provider_id: null }],
       agent: { active_generation: 7, last_known_good_generation: 7, pending_generation_id: null },
+      sync_state: 'changes', sync_sections: ['destination-policy'], sync_diff_available: true,
     } })
     vi.mocked(http.post).mockReset().mockResolvedValue({ data: { revision: 4, base_generation: 7, sections: ['vless'] } })
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
@@ -31,9 +32,9 @@ describe('Working Core panel', () => {
     choose('Фильтр по протоколу', 'VLESS')
     expect(catalog.queryByText('AWG exit')).toBeNull()
     expect(catalog.getByText('VLESS exit')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Проверить изменения' }))
-    expect(await screen.findByText('Есть изменения для применения')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Применить конфигурацию' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр' }))
+    expect(await screen.findByText('Есть неприменённые изменения')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Применить конфигурацию' })).toBeEnabled())
     expect(http.post).toHaveBeenCalledWith('/core/preview')
   })
   it('does not delete an exit when its confirmation is cancelled', async () => {
@@ -154,7 +155,7 @@ describe('Working Core panel', () => {
   })
 
   it('requires an operator to review and apply the same saved draft', async () => {
-    vi.mocked(http.get).mockResolvedValue({
+    vi.mocked(http.get).mockResolvedValueOnce({
       data: {
         revision: 4,
         vless: { address: '192.0.2.20', port: 8443, server_name: 'egress.poc.test' },
@@ -162,8 +163,14 @@ describe('Working Core panel', () => {
         rules: [{ destination: '198.51.100.10/32', port: 18080, egress: 'direct' }],
         resolvers: ['198.51.100.53'],
         agent: { active_generation: 7, last_known_good_generation: 7, pending_generation_id: null },
+        sync_state: 'changes', sync_sections: ['destination-policy'], sync_diff_available: true,
       },
-    })
+    }).mockResolvedValue({ data: {
+      revision: 4, vless: { address: '192.0.2.20', port: 8443, server_name: 'egress.poc.test' },
+      clients: [], rules: [{ destination: '198.51.100.10/32', port: 18080, egress: 'direct' }], resolvers: [],
+      agent: { active_generation: 7, last_known_good_generation: 7, pending_generation_id: null },
+      sync_state: 'synced', sync_sections: [], sync_diff_available: true,
+    } })
     vi.mocked(http.post).mockReset()
       .mockResolvedValueOnce({ data: { revision: 4, base_generation: 7, sections: ['destination-policy'] } })
       .mockResolvedValueOnce({ data: { active_generation: 8 } })
@@ -180,5 +187,71 @@ describe('Working Core panel', () => {
     fireEvent.click(apply)
     expect(await screen.findByText('Конфигурация применена и подтверждена. Контрольные пробы прошли; новое поколение сохранено как LKG.')).toBeInTheDocument()
     expect(http.post).toHaveBeenLastCalledWith('/core/apply', { revision: 4, base_generation: 7 })
+    expect(await screen.findByText('Все изменения применены')).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Неприменённые изменения' })).toBeNull()
+  })
+
+  it('loads synchronized state after a page reload without showing the draft bar', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 12, vless: { address: '192.0.2.20', port: 8443, server_name: 'egress.poc.test' },
+      clients: [], rules: [], resolvers: [], selected_egress_id: 'e1',
+      saved_egresses: [{ id: 'e1', name: 'Applied exit', provider_id: null }],
+      agent: { active_generation: 4, last_known_good_generation: 4, active_egress_id: 'e1', pending_generation_id: null },
+      sync_state: 'synced', sync_sections: [], sync_diff_available: true,
+    } })
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    expect(await screen.findByText('Все изменения применены')).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Неприменённые изменения' })).toBeNull()
+    const catalog = screen.getByRole('region', { name: 'Каталог выходов' })
+    expect(within(catalog).getByText('Активен')).toBeInTheDocument()
+    expect(within(catalog).queryByText('Выбран для применения')).toBeNull()
+  })
+
+  it('never claims synchronization when Agent is unavailable', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 2, vless: null, clients: [], rules: [], resolvers: [], selected_egress_id: null,
+      agent: null, agent_error: 'Agent недоступен', sync_state: 'agent_unavailable',
+      sync_sections: [], sync_diff_available: false,
+    } })
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    expect((await screen.findAllByText('Agent недоступен')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('Все изменения применены')).toBeNull()
+    expect(screen.queryByRole('complementary', { name: 'Неприменённые изменения' })).toBeNull()
+  })
+
+  it('drops the synchronized claim when a later Agent status refresh fails', async () => {
+    vi.mocked(http.get).mockResolvedValueOnce({ data: {
+      revision: 2, vless: { address: '192.0.2.20', port: 8443, server_name: 'egress.poc.test' },
+      clients: [], rules: [], resolvers: [], selected_egress_id: null,
+      agent: { active_generation: 1, last_known_good_generation: 1, pending_generation_id: null },
+      sync_state: 'synced', sync_sections: [], sync_diff_available: true,
+    } }).mockRejectedValueOnce(new Error('status refresh failed'))
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    expect(await screen.findByText('Все изменения применены')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить статус' }))
+    expect(await screen.findByText('Состояние конфигурации неизвестно')).toBeInTheDocument()
+    expect((await screen.findAllByText('Agent недоступен')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('Все изменения применены')).toBeNull()
+  })
+
+  it('keeps an apply failure visible after refreshing Agent state', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 2, vless: { address: '192.0.2.20', port: 8443, server_name: 'egress.poc.test' },
+      clients: [], rules: [], resolvers: [], selected_egress_id: null,
+      agent: { active_generation: 1, last_known_good_generation: 1, pending_generation_id: null },
+      sync_state: 'changes', sync_sections: ['destination-policy'], sync_diff_available: true,
+    } })
+    vi.mocked(http.post).mockReset()
+      .mockResolvedValueOnce({ data: { revision: 2, base_generation: 1, sections: ['destination-policy'] } })
+      .mockRejectedValueOnce(Object.assign(new Error('Apply failed'), {
+        isAxiosError: true, response: { data: { detail: 'Apply failed and was rolled back.' } },
+      }))
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Посмотреть изменения' }))
+    const apply = await screen.findByRole('button', { name: 'Применить конфигурацию' })
+    await waitFor(() => expect(apply).toBeEnabled())
+    fireEvent.click(apply)
+    expect(await screen.findByText('Ошибка применения')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Apply failed and was rolled back.')
   })
 })

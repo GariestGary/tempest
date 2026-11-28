@@ -15,6 +15,7 @@ const state = {
   clients: [{ id: 'c1', name: 'Рабочий ноутбук', addresses: ['10.245.248.3/32'] }, { id: 'c2', name: 'Телефон', addresses: ['10.245.248.4/32'] }],
   rules: [{ destination: '192.0.2.0/24', port: 443, egress: 'vpn' }], default_egress: 'vpn', resolvers: ['1.1.1.1'],
   agent: { active_generation: 12, last_known_good_generation: 12, pending_generation_id: null, last_error: null, active_egress_id: 'e2', egress_state: 'active_verified' }, agent_error: null,
+  sync_state: 'synced', sync_sections: [], sync_diff_available: true,
 }
 if (scenario === 'empty') Object.assign(state, { providers: [], saved_egresses: [], saved_awg_egresses: [], clients: [], rules: [], selected_egress_id: null })
 const server = http.createServer((req, res) => {
@@ -24,7 +25,40 @@ const server = http.createServer((req, res) => {
     const token = ['e30', Buffer.from(JSON.stringify({ exp: 4102444800 })).toString('base64url'), 'mock'].join('.')
     return reply(200, { access_token: token, token_type: 'bearer' })
   }
-  if (req.method === 'POST' && req.url === '/api/core/preview') return reply(200, { revision: 14, base_generation: 12, sections: ['vless', 'destination-policy'] })
+  if (req.method === 'POST' && /^\/api\/core\/(?:awg-)?egresses\/[^/]+\/select$/.test(req.url || '')) {
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      if (Number(JSON.parse(body).revision) !== state.revision) return reply(409, { detail: 'Черновик mock устарел.' })
+      state.selected_egress_id = req.url.split('/').at(-2)
+      state.revision += 1
+      state.sync_state = 'changes'
+      state.sync_sections = ['vless']
+      res.writeHead(204, { 'cache-control': 'no-store' })
+      res.end()
+    })
+    return
+  }
+  if (req.method === 'POST' && req.url === '/api/core/preview') return reply(200, {
+    revision: state.revision, base_generation: state.agent.active_generation, sections: state.sync_sections,
+  })
+  if (req.method === 'POST' && req.url === '/api/core/apply') {
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      const candidate = JSON.parse(body)
+      if (candidate.revision !== state.revision || candidate.base_generation !== state.agent.active_generation) {
+        return reply(409, { detail: 'Preview mock устарел.' })
+      }
+      state.agent.active_generation += 1
+      state.agent.last_known_good_generation = state.agent.active_generation
+      state.agent.active_egress_id = state.selected_egress_id
+      state.sync_state = 'synced'
+      state.sync_sections = []
+      reply(200, state.agent)
+    })
+    return
+  }
   if (req.method === 'POST' && req.url === '/api/core/awg-egresses/preview') return reply(200, { ipv6_configured: false })
   return reply(501, { detail: 'Тестовый режим: изменения не сохраняются и не применяются.' })
 })

@@ -19,7 +19,7 @@ from app.network_agent.models import AgentStatus
 from app.network_agent.xray_agent import XrayJournal
 from app.network_agent.service import AgentServer, PeerPolicy
 from app.network_agent.xray_profile import parse_xray_request
-from tests.test_xray_agent import Runtime, make_agent, plan
+from tests.test_xray_agent import Runtime, awg_profile, make_agent, plan
 
 VLESS_ID = "569e7092-22ee-4931-aec9-2cb20ae71cfb"
 PASSWORD = "working-core-test-password"
@@ -111,6 +111,9 @@ async def apply_draft(http):
 async def test_panel_auth_import_provision_apply_revoke_and_recover(core, session):
     http, runtime, journal = core
     await login(http)
+    initial = (await http.get("/api/core")).json()
+    assert initial["sync_state"] == "active_absent"
+    assert not initial["sync_diff_available"]
     uri = f"vless://{VLESS_ID}@egress.poc.test:8443?type=raw&security=tls&encryption=none"
     invalid = await http.post("/api/core/egress/import", json={"uri": uri.replace("tls", "reality")})
     assert invalid.status_code == 422 and VLESS_ID not in invalid.text
@@ -136,6 +139,9 @@ async def test_panel_auth_import_provision_apply_revoke_and_recover(core, sessio
     assert (await http.put("/api/core/rules", json={"revision": 2, "rules": [rule]})).status_code == 204
     assert runtime.active is None
     assert (await apply_draft(http)).status_code == 200
+    synchronized = (await http.get("/api/core")).json()
+    assert synchronized["sync_state"] == "synced"
+    assert synchronized["sync_sections"] == []
     confirmed = journal.read().lkg
     assert confirmed and confirmed.plan.rules[0].egress == "vpn"
     assert json.loads(runtime.active)["inbounds"][0]["settings"]["peers"][0]["publicKey"] == (
@@ -167,17 +173,27 @@ async def test_working_core_rejects_invalid_or_stale_changes_and_rolls_back(core
     assert (await apply_draft(http)).status_code == 200
     lkg = journal.read().lkg
     assert lkg and runtime.active == lkg.payload()
+    starts = len(runtime.starts)
+    watermark = journal.read().high_water
+    # Identical Apply is idempotent: keep the generation and runtime invocation.
+    assert (await apply_draft(http)).status_code == 200
+    assert len(runtime.starts) == starts
+    assert journal.read().high_water == watermark
+    assert (await http.get("/api/core")).json()["sync_state"] == "synced"
 
     blocked = {"destination": "198.51.100.20/32", "port": 18080, "egress": "block"}
     assert (await http.put("/api/core/rules", json={"revision": 1, "rules": [blocked]})).status_code == 204
+    assert (await http.get("/api/core")).json()["sync_sections"] == ["destination-policy"]
     assert (await http.post("/api/core/apply", json={"revision": 1, "base_generation": 0})).status_code == 409
     status = AgentStatus(state="idle", active_generation=1, last_known_good_generation=1)
     runtime.failure = deployment().plan(Draft(rules=[blocked]), lkg.plan.vless, status).config_bytes()
     assert (await apply_draft(http)).status_code == 409
     assert runtime.active == lkg.payload()
     assert journal.read().high_water == 2
+    assert (await http.get("/api/core")).json()["sync_sections"] == ["destination-policy"]
     runtime.failure = None
     assert (await apply_draft(http)).json()["active_generation"] == 3
+    assert (await http.get("/api/core")).json()["sync_state"] == "synced"
 
     runtime.stop()
     await http.get("/api/core")  # Checking invocation identity surfaces drift.
@@ -185,6 +201,83 @@ async def test_working_core_rejects_invalid_or_stale_changes_and_rolls_back(core
     recovery = await http.post("/api/core/recover")
     assert recovery.status_code == 200 and recovery.json()["active_generation"] == 3
     assert runtime.active == journal.read().lkg.payload()
+
+
+@pytest.mark.asyncio
+async def test_sync_diff_tracks_clients_egress_and_metadata_without_apply(core):
+    http, runtime, journal = core
+    await login(http)
+    assert (await http.put("/api/core/egress", json=MANUAL)).status_code == 204
+    assert (await http.get("/api/core")).json()["sync_state"] == "active_absent"
+    assert (await apply_draft(http)).status_code == 200
+    assert (await http.get("/api/core")).json()["sync_state"] == "synced"
+
+    starts = len(runtime.starts)
+    assert (await http.post("/api/core/providers", json={"revision": 1, "name": "Test"})).status_code == 201
+    provider_id = (await http.get("/api/core")).json()["providers"][0]["id"]
+    assert (await http.put(f"/api/core/providers/{provider_id}", json={"revision": 2, "name": "Renamed"})).status_code == 204
+    state = (await http.get("/api/core")).json()
+    assert state["sync_state"] == "synced" and state["sync_sections"] == []
+    assert len(runtime.starts) == starts
+
+    imported = await http.post("/api/core/awg-egresses", json={
+        "revision": 3, "name": "Catalog AWG", "config": awg_profile(),
+    })
+    assert imported.status_code == 201
+    assert (await http.get("/api/core")).json()["sync_state"] == "synced"
+
+    alternate = await http.post("/api/core/egresses", json={
+        "revision": 4, "name": "Alternate", "uri": {
+            "uri": f"vless://{VLESS_ID}@egress.poc.test:8443?security=tls&type=tcp",
+            "dial_address": "192.0.2.21",
+        },
+    })
+    alternate_id = alternate.json()["id"]
+    assert alternate.status_code == 201
+    assert (await http.post(f"/api/core/egresses/{alternate_id}/select", json={"revision": 5})).status_code == 204
+    state = (await http.get("/api/core")).json()
+    assert state["sync_sections"] == ["vless"]
+    assert (await apply_draft(http)).status_code == 200
+
+    client = await http.post("/api/core/clients", json={"name": "Phone"})
+    assert client.status_code == 201
+    state = (await http.get("/api/core")).json()
+    assert state["sync_state"] == "changes" and state["sync_sections"] == ["wireguard"]
+    assert (await apply_draft(http)).status_code == 200
+    assert (await http.get("/api/core")).json()["sync_state"] == "synced"
+
+    rule = {"destination": "198.51.100.90/32", "port": 18080, "egress": "vpn"}
+    assert (await http.put("/api/core/rules", json={"revision": 7, "rules": [rule]})).status_code == 204
+    state = (await http.get("/api/core")).json()
+    assert state["sync_sections"] == ["destination-policy"]
+    preview = (await http.post("/api/core/preview")).json()
+    # A different successful apply advances active generation after Preview.
+    assert (await apply_draft(http)).status_code == 200
+    stale = await http.post("/api/core/apply", json={
+        "revision": preview["revision"], "base_generation": preview["base_generation"],
+    })
+    assert stale.status_code == 409
+    assert journal.read().high_water == 4
+
+
+@pytest.mark.asyncio
+async def test_sync_state_is_unknown_when_agent_diff_is_unavailable(core, monkeypatch):
+    http, _runtime, _journal = core
+    await login(http)
+    assert (await http.put("/api/core/egress", json=MANUAL)).status_code == 204
+    assert (await apply_draft(http)).status_code == 200
+    original_agent = working_core._agent
+
+    async def unavailable_diff(method, expected, **args):
+        if method == "diff":
+            raise working_core.HTTPException(503, "Agent diff unavailable")
+        return await original_agent(method, expected, **args)
+
+    monkeypatch.setattr(working_core, "_agent", unavailable_diff)
+    state = (await http.get("/api/core")).json()
+    assert state["sync_state"] == "diff_unavailable"
+    assert not state["sync_diff_available"]
+    assert state["sync_sections"] == []
 
 
 def test_probe_direct_is_scoped_and_wireguard_default_is_block(tmp_path):

@@ -32,6 +32,9 @@ type Gateway = {
   resolvers: string[]
   agent: Agent | null
   agent_error: string | null
+  sync_state: 'synced' | 'changes' | 'applying' | 'apply_error' | 'agent_unavailable' | 'active_absent' | 'diff_unavailable'
+  sync_sections: string[]
+  sync_diff_available: boolean
 }
 type DraftDiff = { revision: number; base_generation: number; sections: string[] }
 
@@ -229,6 +232,7 @@ export function WorkingCore() {
     queryKey: ['working-core'],
     queryFn: () => http.get<Gateway>('/core').then(response => response.data),
     retry: false,
+    refetchInterval: 5000,
   })
   const [page, setPage] = useState('overview')
   const [collapsed, setCollapsed] = useState<boolean | null>(null)
@@ -251,6 +255,7 @@ export function WorkingCore() {
   const [importing, setImporting] = useState(true)
   const [savedManual, setSavedManual] = useState(false)
   const [diff, setDiff] = useState<DraftDiff | null>(null)
+  const [applyError, setApplyError] = useState(false)
   const [changePassword, setChangePassword] = useState(false)
   const [awgPreview, setAwgPreview] = useState<{ ipv6_configured: boolean } | null>(null)
   const [awgFileName, setAwgFileName] = useState('')
@@ -363,6 +368,8 @@ export function WorkingCore() {
 
   const agent = data?.agent
   const pending = agent?.pending_generation_id
+  const syncState = isError ? 'agent_unavailable' : data?.sync_state ?? (data?.agent_error ? 'agent_unavailable' : agent?.active_generation ? 'diff_unavailable' : 'active_absent')
+  const syncSections = data?.sync_sections ?? []
   const hasVpn = Boolean(data?.vless || data?.saved_awg_egresses?.some(item => item.id === data.selected_egress_id))
   const egressRows = [
     ...(data?.saved_awg_egresses ?? []).map(item => ({ ...item, kind: 'awg' as const })),
@@ -373,6 +380,15 @@ export function WorkingCore() {
     (protocolFilter === 'all' || (protocolFilter === 'awg' ? item.kind === 'awg' : item.kind !== 'awg')) &&
     (providerFilter === 'all' || (providerFilter === 'none' ? !item.provider_id : item.provider_id === providerFilter)))
   const previewCurrent = Boolean(diff && data && diff.revision === data.revision && agent && diff.base_generation === agent.active_generation)
+  const syncLabel = !data ? '' : applyError || syncState === 'apply_error' ? 'Ошибка применения' : ({
+    synced: 'Все изменения применены',
+    changes: 'Есть неприменённые изменения',
+    applying: 'Применение выполняется',
+    agent_unavailable: 'Состояние конфигурации неизвестно',
+    active_absent: 'Активная конфигурация отсутствует',
+    diff_unavailable: 'Не удалось проверить изменения',
+    apply_error: 'Ошибка применения',
+  } as Record<Gateway['sync_state'], string>)[syncState]
   function showPreview() {
     setPage('overview')
     setGoToPreview(true)
@@ -403,7 +419,7 @@ export function WorkingCore() {
         <header className="wc-topbar">
           <button className="wc-menu" onClick={() => setMobileNav(!mobileNav)} aria-label="Открыть меню"><Menu size={20} /></button>
           <div className="wc-breadcrumb"><span>TEMPEST</span><span className="wc-slash">/</span><strong>{({ overview: 'Обзор', providers: 'Провайдеры', egress: 'Выходы', routing: 'Маршрутизация', clients: 'Клиенты', settings: 'Настройки' } as Record<string, string>)[page]}</strong></div>
-          <div className="wc-top-actions">{import.meta.env.VITE_MOCK_PREVIEW === '1' && <span className="wc-mock-label">МОК · изменения не сохраняются</span>}<span className={`wc-agent ${agent ? 'online' : ''}`}><i />{!data ? 'Статус Agent неизвестен' : agent ? 'Agent подключён' : 'Agent недоступен'}</span><button type="button" className="wc-account" onClick={() => setPage('settings')} aria-label="Настройки учётной записи"><CircleUserRound size={19}/></button><button type="button" className="wc-account" aria-label="Выйти" onClick={() => { localStorage.removeItem('pitun_token'); window.location.assign('/login') }}><LogOut size={18}/></button></div>
+          <div className="wc-top-actions">{import.meta.env.VITE_MOCK_PREVIEW === '1' && <span className="wc-mock-label">МОК · изменения не сохраняются</span>}<span className={`wc-agent ${agent && !isError ? 'online' : ''}`}><i />{!data ? 'Статус Agent неизвестен' : isError || !agent ? 'Agent недоступен' : 'Agent подключён'}</span><button type="button" className="wc-account" onClick={() => setPage('settings')} aria-label="Настройки учётной записи"><CircleUserRound size={19}/></button><button type="button" className="wc-account" aria-label="Выйти" onClick={() => { localStorage.removeItem('pitun_token'); window.location.assign('/login') }}><LogOut size={18}/></button></div>
         </header>
         <main className="wc-main" id="main-content">
           <div className="wc-content">
@@ -440,6 +456,7 @@ export function WorkingCore() {
               <h2 id="apply-heading" className="text-lg font-semibold">Конфигурация</h2>
               <button className={secondary} disabled={busy} onClick={() => void refetch()}>Обновить статус</button>
             </div>
+            <p className={`text-sm ${syncState === 'synced' ? 'text-gray-400' : 'text-amber-400'}`} role="status">{syncLabel}</p>
             <dl className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
               <div><dt className="text-gray-400">Активное поколение</dt><dd>{agent ? agent.active_generation || 'Нет' : 'Неизвестно'}</dd></div>
               <div><dt className="text-gray-400">Последнее подтверждённое (LKG)</dt><dd>{agent ? agent.last_known_good_generation || 'Нет' : 'Неизвестно'}</dd></div>
@@ -448,7 +465,12 @@ export function WorkingCore() {
             </dl>
             {(data.agent_error || agent?.last_error) && <p role="status" className="text-amber-400">{data.agent_error || agent?.last_error}</p>}
             {pending && <button className={secondary} disabled={busy} onClick={() => void run(async () => {
-              await http.post(`/core/pending/${pending}/rollback`)
+              try {
+                await http.post(`/core/pending/${pending}/rollback`)
+              } catch (error) {
+                setApplyError(true)
+                throw error
+              }
               return 'Ожидающее поколение отменено. Проверьте активное поколение.'
             })}>Отменить ожидающее поколение</button>}
             {!!agent?.last_known_good_generation && !agent.active_generation && !pending &&
@@ -468,7 +490,13 @@ export function WorkingCore() {
               <p>{diff.sections.length ? diff.sections.map(section => sections[section] ?? section).join(', ') : 'Нет изменений, влияющих на трафик.'}</p>
               <p className="text-sm text-gray-400">При применении WireGuard переподключится. Подтверждение проверяет трафик контрольного peer.</p>
               <button className={primary} disabled={busy || !previewCurrent || !diff.sections.length} onClick={() => void run(async () => {
-                await http.post('/core/apply', { revision: diff.revision, base_generation: diff.base_generation })
+                setApplyError(false)
+                try {
+                  await http.post('/core/apply', { revision: diff.revision, base_generation: diff.base_generation })
+                } catch (error) {
+                  setApplyError(true)
+                  throw error
+                }
                 return 'Конфигурация применена и подтверждена. Контрольные пробы прошли; новое поколение сохранено как LKG.'
               })}>Применить конфигурацию</button>
             </div>}
@@ -595,7 +623,11 @@ export function WorkingCore() {
                     const provider_id = event.target.value || null
                     void run(async () => { await http.put(`/core/egresses/${item.id}/provider`, { revision: data.revision, provider_id }); return 'Провайдер выхода изменён.' })
                   }}><option value="">Без провайдера</option>{data.providers?.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</Select> : (data.providers?.find(provider => provider.id === item.provider_id)?.name ?? 'Без провайдера')}</td>
-                  <td><div className="wc-status-stack">{(item.kind === 'direct' || item.id === data.selected_egress_id) && <span className="wc-badge wc-badge-draft">В черновике</span>}
+                  <td><div className="wc-status-stack">{!isError && (item.kind === 'direct'
+                    ? Boolean(agent?.active_generation && data.sync_diff_available && !data.selected_egress_id && data.vless && !syncSections.includes('vless'))
+                    : agent?.active_egress_id === item.id) && <span className="wc-badge wc-badge-success">Активен</span>}
+                    {!isError && item.kind !== 'direct' && agent?.active_egress_id !== item.id && item.id === data.selected_egress_id && <span className="wc-badge wc-badge-draft">Выбран для применения</span>}
+                    {!isError && item.kind !== 'direct' && agent?.active_egress_id !== item.id && item.id !== data.selected_egress_id && <span className="wc-badge">Неактивен</span>}
                     {item.kind === 'awg' && agent?.active_egress_id === item.id && <span className={`wc-badge ${agent.egress_state === 'active_verified' ? 'wc-badge-success' : agent.egress_state === 'unavailable' ? 'wc-badge-error' : 'wc-badge-warning'}`}>{agent.egress_state === 'active_verified' ? 'Проверка прошла' : agent.egress_state === 'unavailable' ? 'Недоступен' : 'Не проверен'}</span>}
                     {item.kind === 'awg' && agent?.active_egress_id === item.id && agent.egress_checked_epoch_ms && <small>Проверка: {new Date(agent.egress_checked_epoch_ms).toLocaleString('ru-RU')}</small>}
                   </div></td>
@@ -661,9 +693,9 @@ export function WorkingCore() {
         </>}
           </div>
         </main>
-        {data && <aside className={`wc-draft-bar ${previewCurrent && diff?.sections.length ? 'has-changes' : ''}`} aria-label="Состояние черновика">
-          <div><strong>Черновик · {data.revision}</strong><span>{pending ? 'Ожидается завершение применения' : previewCurrent ? (diff?.sections.length ? 'Есть изменения для применения' : 'Изменений трафика нет') : 'Изменения не проверены'}</span></div>
-          <button type="button" className={secondary} disabled={busy || !agent || !hasVpn || Boolean(pending)} onClick={showPreview}>{previewCurrent ? 'К предпросмотру' : 'Проверить изменения'}</button>
+        {data && !isError && ['changes', 'active_absent', 'apply_error'].includes(syncState) && data.sync_diff_available && syncSections.length > 0 && <aside className="wc-draft-bar has-changes" aria-label="Неприменённые изменения">
+          <div><strong>Неприменённые изменения</strong><span>{syncSections.map(section => sections[section] ?? section).join(', ')}</span></div>
+          <button type="button" className={secondary} disabled={busy || !agent || Boolean(pending)} onClick={showPreview}>Предпросмотр</button>
         </aside>}
       </div>
       {decision && <DecisionDialog key={`${decision.title}-${decision.initial ?? decision.body}`} title={decision.title} body={decision.body} initial={decision.initial} onCancel={() => setDecision(null)} onConfirm={value => { const action = decision.confirm; setDecision(null); action(value) }}/>}

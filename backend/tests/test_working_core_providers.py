@@ -49,6 +49,10 @@ async def test_provider_catalog_preserves_legacy_exits_and_checks_revisions(cata
     http = catalog_http
     assert (await http.post('/api/core/providers', json={'revision': 0, 'name': 'P'})).status_code == 401
     await authenticate(http)
+    unavailable = (await http.get('/api/core')).json()
+    assert unavailable['sync_state'] == 'agent_unavailable'
+    assert not unavailable['sync_diff_available']
+    assert unavailable['sync_sections'] == []
     uri = f'vless://{VLESS_ID}@egress.poc.test:8443?security=tls&type=tcp'
     exit_response = await http.post('/api/core/egresses', json={'revision': 0, 'name': 'Old exit', 'uri': {'uri': uri, 'dial_address': '192.0.2.20'}})
     assert exit_response.status_code == 201

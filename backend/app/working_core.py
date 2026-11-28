@@ -191,6 +191,32 @@ async def current(response: Response, session: AsyncSession = Depends(get_sessio
         agent = await _agent("read_status", AgentStatus)
     except HTTPException as exc:
         agent_error = exc.detail
+    sections: list[str] = []
+    diff_available = False
+    if agent is not None:
+        if agent.pending_generation_id is None and (vless is not None or any(
+            item.id == draft.selected_egress_id for item in draft.saved_awg_egresses
+        )):
+            try:
+                plan = _plan(draft, vless, agent)
+                diff = await _agent("diff", NetworkDiff, plan=plan)
+                sections = [*diff.added, *diff.changed, *diff.removed]
+                diff_available = True
+            except HTTPException as exc:
+                # A failed diff is unknown state, never a claim that the draft is applied.
+                agent_error = exc.detail
+        if agent.pending_generation_id:
+            sync_state = "applying"
+        elif agent.last_error:
+            sync_state = "apply_error"
+        elif not agent.active_generation:
+            sync_state = "active_absent"
+        elif not diff_available:
+            sync_state = "diff_unavailable"
+        else:
+            sync_state = "changes" if sections else "synced"
+    else:
+        sync_state = "agent_unavailable"
     return {
         "revision": draft.revision,
         "providers": [{"id": item.id, "name": item.name} for item in draft.providers],
@@ -216,6 +242,9 @@ async def current(response: Response, session: AsyncSession = Depends(get_sessio
         "resolvers": app.state.deployment.resolvers,
         "agent": agent,
         "agent_error": agent_error,
+        "sync_state": sync_state,
+        "sync_sections": sections,
+        "sync_diff_available": diff_available,
     }
 
 
@@ -639,6 +668,11 @@ async def apply(body: ApplyDraft, session: AsyncSession = Depends(get_session)):
         _check_revision(body.revision, draft)
         if plan.base_generation != body.base_generation:
             raise HTTPException(409, "The running configuration changed. Review the new diff.")
+        current_diff = await _agent("diff", NetworkDiff, plan=plan)
+        if not (current_diff.added or current_diff.changed or current_diff.removed):
+            # The exact desired plan is already active. Do not allocate a generation,
+            # restart Xray, or disrupt connected clients for a metadata-only edit.
+            return await _agent("read_status", AgentStatus)
         generation = plan.generation_id
         await _agent("stage", NetworkDiff, plan=plan)
         try:
