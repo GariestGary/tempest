@@ -487,6 +487,8 @@ class IngressAdapter(Protocol):
 
 2026-11-28, Working Core UX: API сверяет желаемый Xray plan с активным Agent через существующий `diff` и возвращает доступность результата и изменённые разделы. UI показывает панель только при достоверном непустом diff, автоматически обновляет состояние после операций и периодически для Agent status. Идентичный Apply не создаёт поколение и не перезапускает runtime. Ошибка diff не трактуется как синхронизация; детали тестов и ограничения — в верхней записи [STATUS.md](STATUS.md).
 
+2026-11-28, deployment sync: read-only SSH подтвердил на VORTEX enabled/active network, Xray Agent и panel units, старый `vortex-panel` с Docker restart policy `no` и Caddy proxy target `tempest-working-core-web:8080` при наличии `forward_auth`. Repository получает panel unit, ожидание connectable Agent socket, явный boot-ordering и отдельный installer. Восстановление после reboot не проверялось; текущая Compose directory по Docker labels не содержала Compose manifests во время аудита. Production не изменялся; подробности в [FIRST_VORTEX_DEPLOYMENT.md](FIRST_VORTEX_DEPLOYMENT.md) и [VORTEX_LEGACY_INVENTORY.md](VORTEX_LEGACY_INVENTORY.md).
+
 **Единый компактный технический долг** (причина → условие закрытия):
 - AWG runtime и совместимость с фактическими параметрами AWG 3.x ещё не подтверждены → интегрировать готовую реализацию с TCP/UDP, безопасным lifecycle и проверить реальный маршрут.
 - Внешний клиент и публикация UDP ingress не проверены → проверить при первом практическом подключении устройства.

@@ -1,6 +1,16 @@
 # VORTEX: инвентаризация и границы замены старого TEMPEST
 
-Снимок 27.11.2026: read-only SSH и два read-only sudo-отчёта владельца. Состояние изменчиво; перед действиями повторить сверку и сопоставить PID/container ID, содержимое конфигураций и зависимости. Имена или метки сами по себе не доказывают исключительное владение. Никакие секреты из конфигураций здесь не приводятся.
+Базовый снимок 27.11.2026: read-only SSH и два read-only sudo-отчёта владельца. Более свежая read-only проверка текущего deployment записана ниже. Состояние изменчиво; перед действиями повторить сверку и сопоставить PID/container ID, содержимое конфигураций и зависимости. Имена или метки сами по себе не доказывают исключительное владение. Никакие секреты из конфигураций здесь не приводятся.
+
+## Deployment sync, read-only 2026-11-28
+
+- Подтверждён host `vortex`. `tempest-wc-network.service`, `tempest-xray-agent.service` и `tempest-wc-panel.service` были `active` и `enabled`. До изменений этого коммита fragments network и Xray Agent совпадали по SHA-256 с репозиторием; panel unit установлен вручную и в репозитории на начало аудита отсутствовал. Repository Agent unit теперь явно связан с topology unit; production не обновлялся.
+- `tempest-wc-panel.service` — `Type=oneshot`, `RemainAfterExit=yes`; требует Docker и Xray Agent, запускает `docker compose start --wait` из `/opt/tempest-deploy-92fec95`. Его `ExecStartPre` — ограниченный Fish loop на наличие socket path. В tracked unit теперь используется Python helper, проверяющий active Agent и connectable AF_UNIX socket, а panel явно зависит также от topology unit.
+- Docker labels panel/API подтверждали два Compose manifest пути в deployment directory; сами manifests и Git metadata в этой директории на момент проверки отсутствовали. Это мешает подтвердить повторный `docker compose start` после reboot. Испытание reboot не проводилось.
+- Контейнер старой панели `vortex-panel` сохранён с Docker restart policy `no`; одноимённый systemd unit отсутствует. В Caddy site обнаружены target `tempest-working-core-web:8080` и `forward_auth`; значения секретов и конфигурационные файлы не читались/не публиковались. Старый контейнер/volume и общая сеть `proxy` не менялись.
+- Этот audit был read-only: systemd, Docker metadata и Caddy не изменялись. Caddy и VORTEX не перезагружались.
+
+Следующая таблица остаётся историческим снимком до отключения старой панели и перенаправления Caddy. Состояния sing-box, WG endpoint, guard, volumes и прежних сервисов, не перечисленные в актуальном аудите, здесь не обновлялись.
 
 ## Установленная связь со старым TEMPEST
 

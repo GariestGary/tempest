@@ -1,6 +1,8 @@
 [Unit]
 Description=TEMPEST Xray configuration Agent
 After=local-fs.target dbus.service systemd-tmpfiles-setup.service
+BindsTo=tempest-wc-network.service
+After=tempest-wc-network.service
 AssertPathIsMountPoint=/run/netns/tempest-ns-xray
 
 [Service]

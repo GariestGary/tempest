@@ -37,3 +37,16 @@ on TORNADO or VORTEX as part of task 2.2.
 ## Xray MVP (opt-in)
 
 Настройка отдельного AF_UNIX сокета, systemd unit, ограниченного polkit и traffic verifier описана в [Xray lifecycle](../../docs/XRAY_MVP_LIFECYCLE.md).
+
+## Working Core boot ordering
+
+Production Working Core uses `tempest-xray-agent.service`, which requires the
+network-topology unit because its namespace is created there. The panel unit
+waits for an active Agent and a connectable AF_UNIX socket before it calls
+`docker compose start --wait`. Install and enable the network, Agent and panel
+units with `scripts/deploy/install-working-core-systemd.sh`; it does not start
+them. See [Working Core deployment](../working-core/README.md) for persistent
+Compose bundle prerequisites and the current VORTEX audit limits.
+
+`tempest-network-agent.service` is a separate IPC mock/template and is not the
+Xray Agent deployed for Working Core.

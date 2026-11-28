@@ -1,0 +1,17 @@
+[Unit]
+Description=TEMPEST Working Core Control Plane
+Requires=docker.service tempest-wc-network.service tempest-xray-agent.service
+After=docker.service tempest-wc-network.service tempest-xray-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/tempest/working-core-panel.env
+ExecStartPre=/usr/bin/python3 /opt/tempest/bin/wait-agent-socket.py --socket=/run/tempest-xray-agent/control.sock --timeout=120
+ExecStart=/usr/bin/docker compose --project-directory=${TEMPEST_DEPLOY_DIR} --env-file=${TEMPEST_DEPLOY_DIR}/.env --file=${TEMPEST_DEPLOY_DIR}/docker-compose.working-core.yml --file=${TEMPEST_DEPLOY_DIR}/deploy/working-core/vortex.compose.yml start --wait --wait-timeout 120
+ExecStop=/usr/bin/docker compose --project-directory=${TEMPEST_DEPLOY_DIR} --env-file=${TEMPEST_DEPLOY_DIR}/.env --file=${TEMPEST_DEPLOY_DIR}/docker-compose.working-core.yml --file=${TEMPEST_DEPLOY_DIR}/deploy/working-core/vortex.compose.yml stop panel api
+TimeoutStartSec=300
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target
