@@ -19,8 +19,9 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from uuid import UUID
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).absolute().parents[2]
 ENV_FILE = Path('/etc/tempest/working-core-panel.env')
 STATE_DIR = Path('/var/lib/tempest-updater')
 BACKUP_DIR = Path('/var/backups/tempest/updater')
@@ -30,22 +31,100 @@ DEPLOY = re.compile(r'^/opt/tempest-deploy-([0-9a-f]{40})$')
 SERVICES = ('api', 'panel')
 COMPOSE_FILES = ('docker-compose.working-core.yml', 'deploy/working-core/vortex.compose.yml')
 
+# Executed by the system Python under sudo. It reads only the committed blob
+# after independently checking HEAD, origin/master and both hosted workflows.
+# No Python file or shell script from the mutable checkout runs as root first.
+ROOT_BOOTSTRAP = r'''
+import json, os, pathlib, re, subprocess, sys, urllib.request
+root = pathlib.Path(sys.argv[1])
+sha, mode = sys.argv[2:4]
+if (not root.is_absolute() or root.resolve() != root
+        or not re.fullmatch(r'[0-9a-f]{40}', sha)
+        or mode not in ('--internal-root', '--check', '--status', '--rollback')):
+    raise SystemExit('unsafe updater invocation')
+git = ['/usr/bin/git', '--no-optional-locks', '-c', f'safe.directory={root}',
+       '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-C', str(root)]
+env = {'PATH': '/usr/bin:/bin', 'HOME': '/root', 'LANG': 'C',
+       'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
+       'GIT_OPTIONAL_LOCKS': '0', 'GIT_NO_REPLACE_OBJECTS': '1'}
+def checked(*args):
+    return subprocess.check_output([*git, *args], env=env,
+                                   stderr=subprocess.DEVNULL).decode().strip()
+if (checked('rev-parse', 'HEAD') != sha or checked('symbolic-ref', '--short', 'HEAD') != 'master'
+        or checked('status', '--porcelain', '--untracked-files=all')
+        or checked('remote', 'get-url', 'origin') not in
+        ('https://github.com/GariestGary/tempest.git', 'git@github.com:GariestGary/tempest.git')):
+    raise SystemExit('checkout changed before privilege escalation')
+if mode in ('--rollback', '--status') and checked('rev-parse', 'refs/remotes/origin/master') != sha:
+    raise SystemExit('HEAD differs from local origin/master')
+if mode not in ('--rollback', '--status'):
+    api = 'https://api.github.com/repos/GariestGary/tempest/'
+    def fetch(path):
+        request = urllib.request.Request(api + path, headers={
+            'Accept': 'application/vnd.github+json', 'User-Agent': 'TEMPEST-vortex-updater'})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return json.load(response)
+    if fetch('git/ref/heads/master')['object']['sha'] != sha:
+        raise SystemExit('HEAD is not published origin/master')
+    for workflow in ('ci.yml', 'codeql.yml'):
+        runs = fetch(f'actions/workflows/{workflow}/runs?head_sha={sha}&event=push&per_page=30')['workflow_runs']
+        matches = [r for r in runs if r.get('head_sha') == sha and r.get('event') == 'push'
+                   and r.get('head_branch') == 'master']
+        if not matches or max(matches, key=lambda r: r['id']).get('conclusion') != 'success':
+            raise SystemExit('Hosted CI/CodeQL is not successful for HEAD')
+source_path = root / 'scripts/deploy/update_vortex.py'
+source = subprocess.check_output([*git, 'show', f'{sha}:scripts/deploy/update_vortex.py'],
+                                 env=env, stderr=subprocess.DEVNULL)
+sys.argv = [str(source_path), mode]
+exec(compile(source, str(source_path), 'exec'), {'__name__': '__main__', '__file__': str(source_path)})
+'''
+
 
 class Refusal(RuntimeError):
     pass
 
 
-def run(*args: str, capture: bool = True, cwd: Path | None = None) -> str:
+def run(*args: str, capture: bool = True, cwd: Path | None = None,
+        env: dict[str, str] | None = None) -> str:
     result = subprocess.run(args, cwd=cwd, text=True, stdout=subprocess.PIPE if capture else None,
-                            stderr=subprocess.PIPE if capture else None, check=False)
+                            stderr=subprocess.PIPE if capture else None, check=False, env=env)
     if result.returncode:
         # Subprocess stderr can contain secrets (especially Compose interpolation).
         raise Refusal(f'{args[0]} failed (exit {result.returncode}); inspect its protected local logs')
     return result.stdout.strip() if capture else ''
 
 
+def git_command() -> tuple[str, ...]:
+    # Explicit trust for this checked checkout when root runs Git. Avoid
+    # repository-configured filesystem monitors, hooks and external diffs.
+    return ('/usr/bin/git', '--no-optional-locks', '-c', f'safe.directory={ROOT}',
+            '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+            '-C', str(ROOT))
+
+
+def git_env() -> dict[str, str]:
+    return {'PATH': '/usr/bin:/bin', 'HOME': '/root', 'LANG': 'C',
+            'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
+            'GIT_OPTIONAL_LOCKS': '0', 'GIT_NO_REPLACE_OBJECTS': '1',
+            'GIT_PAGER': 'cat'}
+
+
 def git(*args: str) -> str:
-    return run('git', '-C', str(ROOT), *args)
+    return run(*git_command(), *args, env=git_env())
+
+
+def public_json(url: str) -> dict:
+    request = urllib.request.Request(url, headers={
+        'Accept': 'application/vnd.github+json', 'User-Agent': 'TEMPEST-vortex-updater',
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            data = json.load(response)
+    except (OSError, ValueError) as exc:
+        raise Refusal(f'cannot verify GitHub state: {type(exc).__name__}') from None
+    if not isinstance(data, dict):
+        raise Refusal('invalid GitHub response')
+    return data
 
 
 def revision(*, online: bool = True) -> str:
@@ -61,7 +140,7 @@ def revision(*, online: bool = True) -> str:
         'git@github.com:GariestGary/tempest.git',
     ):
         raise Refusal('unexpected origin')
-    remote = (git('ls-remote', 'origin', 'refs/heads/master').split()[0] if online
+    remote = (public_json('https://api.github.com/repos/GariestGary/tempest/git/ref/heads/master')['object']['sha'] if online
               else git('rev-parse', 'refs/remotes/origin/master'))
     if remote != sha:
         raise Refusal('HEAD is not the current origin/master; run git pull --ff-only')
@@ -73,14 +152,7 @@ def workflow_success(sha: str) -> None:
     for workflow in ('ci.yml', 'codeql.yml'):
         url = ('https://api.github.com/repos/GariestGary/tempest/actions/workflows/'
                f'{workflow}/runs?head_sha={sha}&event=push&per_page=30')
-        request = urllib.request.Request(url, headers={
-            'Accept': 'application/vnd.github+json', 'User-Agent': 'TEMPEST-vortex-updater',
-        })
-        try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                data = json.load(response)
-        except (OSError, ValueError) as exc:
-            raise Refusal(f'cannot verify Hosted CI/CodeQL ({workflow}): {type(exc).__name__}') from None
+        data = public_json(url)
         runs = [r for r in data.get('workflow_runs', ()) if r.get('head_sha') == sha
                 and r.get('head_branch') == 'master' and r.get('event') == 'push']
         if not runs or max(runs, key=lambda r: r['id']).get('conclusion') != 'success':
@@ -163,8 +235,8 @@ def classify(paths: list[str]) -> str:
 def changed(base: str, target: str) -> list[str]:
     if not SHA.fullmatch(base) or not SHA.fullmatch(target):
         raise Refusal('invalid revision')
-    run('git', '-C', str(ROOT), 'merge-base', '--is-ancestor', base, target)
-    return git('diff', '--name-only', f'{base}..{target}').splitlines()
+    git('merge-base', '--is-ancestor', base, target)
+    return git('diff', '--no-ext-diff', '--no-textconv', '--name-only', f'{base}..{target}').splitlines()
 
 
 def validate_lineage(path: Path, images: dict[str, dict]) -> None:
@@ -220,12 +292,32 @@ def preflight(path: Path, kind: str, images: dict[str, dict], *, skip_space: boo
 def agent_status(container_id: str) -> dict:
     data = json.loads(run('docker', 'exec', container_id, 'python', '-m',
                           'app.network_agent.xray_client', 'read_status'))
-    # IPC result contains status directly on supported production profile.
-    return {key: data.get(key) for key in ('active_generation', 'active_generation_id',
-                                          'last_known_good_generation', 'pending_generation_id')}
+    if not isinstance(data, dict) or data.get('protocol_version') != 1 or data.get('ok') is not True:
+        raise Refusal('Agent IPC returned an unsuccessful or invalid response')
+    result = data.get('result')
+    if data.get('error') is not None or not isinstance(result, dict):
+        raise Refusal('Agent IPC response has no valid result')
+    # xray_client serializes with exclude_none=True, so a confirmed status
+    # omits pending_generation_id rather than emitting null.
+    required = ('state', 'active_generation', 'active_generation_id',
+                'last_known_good_generation')
+    if any(key not in result for key in required):
+        raise Refusal('Agent IPC status is incomplete')
+    active = result['active_generation']
+    lkg = result['last_known_good_generation']
+    if (result['state'] != 'idle' or type(active) is not int or type(lkg) is not int
+            or active <= 0 or active != lkg or result.get('pending_generation_id') is not None):
+        raise Refusal('Agent active generation/LKG mismatch or pending state')
+    try:
+        generation_id = str(UUID(result['active_generation_id']))
+    except (TypeError, ValueError, AttributeError):
+        raise Refusal('Agent active generation ID is invalid') from None
+    return {'state': 'idle', 'active_generation': active,
+            'active_generation_id': generation_id,
+            'last_known_good_generation': lkg, 'pending_generation_id': None}
 
 
-def verify(path: Path, before: dict | None = None) -> None:
+def verify(path: Path, before: dict | None = None) -> dict:
     current = containers(path)
     if current['api']['health'] != 'healthy':
         raise Refusal('API healthcheck failed')
@@ -241,6 +333,23 @@ def verify(path: Path, before: dict | None = None) -> None:
                     raise Refusal(f'panel {endpoint} returned HTTP {response.status}')
         except urllib.error.URLError:
             raise Refusal(f'panel {endpoint} is unavailable') from None
+    # Nginx uses Docker DNS with a 10-second TTL. After API recreation its
+    # cached address may briefly point at the removed container.
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/core', timeout=5):
+                pass
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                exc.close()
+                break  # API auth rejected the anonymous request through Nginx.
+            exc.close()
+        except urllib.error.URLError:
+            pass
+        if time.monotonic() >= deadline:
+            raise Refusal('API is unavailable through panel Nginx')
+        time.sleep(2)
     after = agent_status(current['api']['id'])
     if not after['active_generation'] or after['active_generation'] != after['last_known_good_generation']:
         raise Refusal('Agent active generation/LKG mismatch')
@@ -248,6 +357,7 @@ def verify(path: Path, before: dict | None = None) -> None:
         raise Refusal('Agent has an unconfirmed generation')
     if before is not None and after != before:
         raise Refusal('Agent generation changed during control-plane update')
+    return after
 
 
 def atomic(path: Path, data: str, mode: int = 0o600) -> None:
@@ -322,12 +432,36 @@ def stage(sha: str, old: Path) -> Path:
         if marker.is_file() and marker.read_text().strip() == sha:
             return target  # interrupted pre-build stage; safe to rebuild
         raise Refusal('target bundle exists without matching revision marker')
-    run(str(ROOT / 'scripts/deploy/prepare-build-context.sh'), sha, str(target), capture=False)
+    target.mkdir(mode=0o700)
     try:
+        archive = subprocess.Popen([*git_command(), 'archive', sha, 'backend', 'frontend'],
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                   env=git_env())
+        try:
+            extracted = subprocess.run(['/usr/bin/tar', '-x', '-C', str(target), '--no-same-owner'],
+                                       stdin=archive.stdout, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, check=False, env=git_env())
+        finally:
+            archive.stdout.close()
+        if archive.wait() or extracted.returncode:
+            raise Refusal('committed build context could not be exported')
+        for context in (target / 'backend', target / 'frontend'):
+            if not context.is_dir() or context.is_symlink():
+                raise Refusal('committed build context is incomplete')
+            for entry in context.rglob('*'):
+                if entry.is_symlink():
+                    raise Refusal('committed build context contains a symlink')
+                if entry.is_dir():
+                    entry.chmod(0o755)
+                elif entry.is_file():
+                    entry.chmod(0o755 if entry.stat().st_mode & 0o111 else 0o644)
+            context.chmod(0o755)
+        (target / 'backend/entrypoint.sh').chmod(0o755)
         for name in COMPOSE_FILES:
             output = target / name
             output.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-            output.write_bytes(subprocess.check_output(['git', '-C', str(ROOT), 'show', f'{sha}:{name}']))
+            output.write_bytes(subprocess.check_output([*git_command(), 'show', f'{sha}:{name}'],
+                                                      stderr=subprocess.DEVNULL, env=git_env()))
             os.chmod(output, 0o644)
         shutil.copy2(old / '.env', target / '.env')
         os.chmod(target / '.env', 0o600)
@@ -347,7 +481,8 @@ def restore(tx: dict) -> None:
     for service in tx['services']:
         run('docker', 'tag', images[service], f'{PROJECT}-{service}:latest')
     if tx['services']:
-        compose(old, 'up', '-d', '--no-build', '--no-deps', '--force-recreate', *tx['services'], capture=False)
+        compose(old, 'up', '-d', '--no-build', '--no-deps', '--force-recreate',
+                '--wait', '--wait-timeout', '120', *tx['services'], capture=False)
     verify(old, tx['agent'])
     atomic(ENV_FILE, f'TEMPEST_DEPLOY_DIR={old}\n', 0o644)
     write_installed(old)
@@ -394,7 +529,8 @@ def main() -> None:
         workflow_success(sha)
     if os.geteuid() != 0:
         mode = '--status' if args.status else '--check' if args.check else '--rollback' if args.rollback else '--internal-root'
-        os.execvp('sudo', ['sudo', sys.executable, str(Path(__file__).resolve()), mode])
+        os.execv('/usr/bin/sudo', ['/usr/bin/sudo', '-H', '/usr/bin/python3', '-I', '-S', '-c',
+                                   ROOT_BOOTSTRAP, str(ROOT), sha, mode])
     if not args.status and not args.check:
         if STATE_DIR.is_symlink():
             raise Refusal('updater state directory is unsafe')
@@ -424,8 +560,9 @@ def main() -> None:
         if tx['target'] != str(old):
             raise Refusal('rollback record does not match installed bundle')
         preflight(old, 'none', current)
-        verify(old, tx['agent'])
         backup(old, current, base)
+        current_agent = verify(old)
+        tx = {**tx, 'agent': current_agent}
         record(pending, tx)
         restore(tx)
         previous.unlink()
@@ -474,13 +611,15 @@ def main() -> None:
             raise
         record(pending, tx)
         try:
-            compose(target, 'up', '-d', '--no-build', '--no-deps', '--force-recreate', *selected, capture=False)
+            compose(target, 'up', '-d', '--no-build', '--no-deps', '--force-recreate',
+                    '--wait', '--wait-timeout', '120', *selected, capture=False)
             verify(target, agent)
         except BaseException:
             restore(tx)
             raise
     else:
         verify(old, agent)
+        record(pending, tx)
     atomic(ENV_FILE, f'TEMPEST_DEPLOY_DIR={target}\n', 0o644)
     write_installed(target)
     record(STATE_DIR / 'previous.json', tx)

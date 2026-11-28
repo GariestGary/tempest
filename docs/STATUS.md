@@ -1,5 +1,21 @@
 # TEMPEST — статус форка
 
+## 2026-11-28 · Точечное исправление updater
+
+После первого `--check` на VORTEX обнаружен отказ `Agent active generation/LKG mismatch`:
+CLI Xray Agent возвращает `IPCResponse.result`, а updater читал поля из корня
+JSON. Updater теперь проверяет `ok`, типизированную структуру результата,
+`idle`, действующие совпадающие active/LKG и отсутствие pending generation;
+тест использует сериализацию настоящего `IPCResponse` с `exclude_none=True`.
+Compose update/rollback ожидает health до 120 секунд. Ручной rollback сравнивает
+актуальное состояние Agent непосредственно до и после операции. Добавлены
+журнал для обновления без пересборки, проверка API через nginx с повтором
+после смены IP контейнера и переход к root только через код из проверенного
+Git blob; root Git использует явный `safe.directory` и отключённые внешние
+хуки/мониторы. Локальные регрессионные тесты updater: 33 passed. Hosted CI и
+CodeQL проверяются после публикации. На VORTEX изменений не выполнялось;
+новый `--check` там не запускался.
+
 ## 2026-11-28 · Штатный updater VORTEX подготовлен
 
 Добавлен `update-vortex.sh`: проверка точного origin/master и Hosted CI/CodeQL,
