@@ -1,6 +1,56 @@
 # Замена старого TEMPEST на VORTEX
 
+## Штатное обновление control plane
+
+Первое обновление новым механизмом и все последующие выполняются одинаково,
+из Fish или Bash:
+
+```sh
+cd ~/Docker/tempest
+git pull --ff-only
+./scripts/deploy/update-vortex.sh --check
+./scripts/deploy/update-vortex.sh
+```
+
+`--check` проверяет состав и доступность обновления без изменения production;
+эту команду можно опустить. `--status` показывает установленный и целевой SHA,
+тип обновления и состояние контейнеров. `--rollback` возвращает предыдущий
+совместимый API/UI bundle и образы, сохраняя текущую SQLite; перед откатом
+создаётся новая защищённая копия. Для восстановления данных БД из backup
+нужна отдельная проверка совместимости и ручная операция, иначе можно потерять
+изменения пользователей после обновления.
+
+Updater проверяет чистый `master`, точное совпадение с `origin/master` и
+успешные push-запуски Hosted CI/CodeQL для HEAD через публичный GitHub API.
+Токен в команду не вводится. Он сравнивает HEAD с версией действующего
+deployment bundle, проверяет контейнеры и службы, место на `/opt`, создаёт
+root-only online backup SQLite и копии конфигурации, сохраняет image IDs и
+строит новые образы до замены контейнеров. После проверки HTTP, Agent IPC и
+неизменности active/LKG он атомарно обновляет путь panel unit. Ошибка после
+замены контейнеров вызывает rollback; прерванная транзакция восстанавливается
+при следующем обычном запуске. Одновременно работает только один updater.
+
+Изменения Agent, runtime, systemd, Compose и неизвестных файлов updater
+отклоняет до изменения production: для них требуется отдельная согласованная
+процедура. Обычное обновление не вызывает Apply, не перезапускает Agent,
+network unit или dataplane и не трогает другие Docker-проекты. Хранение
+созданных updater backup/bundle ограничено `TEMPEST_UPDATE_KEEP` (2–5,
+по умолчанию 2); текущий, предыдущий и используемые контейнерами bundle
+сохраняются. Минимальный запас места задаёт `TEMPEST_UPDATE_RESERVE_GIB`
+(по умолчанию 3 ГиБ сверх оценки сборки). Старые ручные backup и чужие
+Docker-объекты updater не удаляет.
+
+На VORTEX первое выполнение нового updater ещё не проверено. Read-only SSH
+после подготовки этой инструкции показал Compose labels обоих контейнеров на
+bundle `daf4b070` (позднее, чем задокументированный `a4aee115`); путь panel
+unit остался непроверенным. Перед первым запуском сверить вывод `--check`;
+при расхождении bundle и Docker labels updater остановится до мутации.
+
 ## Состояние control plane после обновления 2026-11-28
+
+Следующий раздел — исторический снимок установки `a4aee115`. Позднейший
+read-only осмотр контейнеров показал Compose bundle `daf4b070`; состояние
+panel unit и данные SQLite в этом осмотре не проверялись.
 
 Control plane собран из проверенного master `a4aee1156a590ac23f3c63c72ba117b91d01296d`: API и Web UI `1.7.8`. Image IDs: API `sha256:6e881ba89b49b28665e72836dd7a6b1e9c9738e3adedfd3ddf33d4c081c504eb`, panel `sha256:6012e3fb0ca834544765970e8bead42eef2602106ce78d1ac0fe816bd6399544`. Работающие контейнеры используют Compose project `tempest-working-core` и постоянный root-owned bundle `/opt/tempest-deploy-a4aee1156a590ac23f3c63c72ba117b91d01296d`. Panel unit заменён tracked версией; `systemctl daemon-reload` выполнен. API `healthy`, panel `running`; SQLite volume `tempest-working-core_core_db`, bind mount private provisioning и Agent socket сохранены.
 
