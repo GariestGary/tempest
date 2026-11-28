@@ -14,7 +14,7 @@
 
 **Рабочая единица — функциональный результат задания.** Самостоятельно планировать и выполнять обратимые изменения кода, моделей, модулей, тестов и UX, проверять их и исправлять дефекты до готовности блока. Реализацию можно разбивать на небольшие изменения для проверки. Владелец оценивает блок целиком. Некритические дефекты идут в backlog.
 
-**Существенные блокеры.** Остановиться, если безопасно продолжать нельзя, требуется изменение production, есть риск потери данных, отсутствует обязательный ресурс или нужно изменить принципиальные требования. Выполнить независимую работу и запросить только конкретное необходимое разрешение. Рискованные сетевые мутации, необратимые действия и production deployment согласовываются отдельно.
+**Существенные блокеры.** Остановиться, если безопасно продолжать нельзя, есть риск потери данных, отсутствует обязательный ресурс или нужно изменить принципиальные требования. Production-действие требует явного разрешения владельца именно на эту операцию. Получив его, выполнить необходимую разрешённую работу автономно, без повторного согласования промежуточных шагов. До любой production-мутации сделать защищённую резервную копию и подготовить проверяемый план rollback. Необратимые действия всё равно требуют отдельного разрешения.
 
 **Перед собственной реализацией** проверить готовые возможности в PiTun, Xray, sing-box, WireGuard, AmneziaWG и других подходящих технологиях, исходниках прежнего vortex-network-panel, Linux, Docker Compose и systemd. Предпочитать переиспользование и небольшой интеграционный адаптер. Любая новая подсистема требует конкретной продуктовой потребности.
 
@@ -373,10 +373,9 @@ FastAPI/React/SQLite Control Plane остаётся отдельным непр�
 | Окружение | Назначение | Сетевая политика |
 |---|---|---|
 | **dev / TORNADO** | Codex, Python/Node tests, сборка, privilege-free mock Agent | Без реального изменения Windows/Linux firewall |
-| **safe Linux tests / VORTEX** | Только выбранные непривилегированные pytest для NetworkPlan, registry, fixture inventory, AF_UNIX/SO_PEERCRED и Agent mode boundary на проверенном SHA | Без host networking changes, контейнеров, системных служб, dataplane и privileged Agent; ограничение ресурсов и времени |
-| **integration / Linux VM** | nftables, WireGuard, TUN, маршрутизация, negative tests | Выделенный изолированный namespace/VM, snapshot, консольный доступ |
+| **production / VORTEX** | Read-only аудит, диагностика TEMPEST, проверка логов/состояния служб; установка, обновление и обслуживание TEMPEST только при явном разрешении владельца | Перед мутацией обязательны backup и rollback. Без отдельного разрешения запрещены reboot, вмешательство в сторонние службы, host firewall/routing и работающий dataplane |
+| **experimental / Linux VM** | Экспериментальная разработка и потенциально опасные сетевые тесты, включая nftables, WireGuard, TUN, маршрутизацию и negative tests | Disposable изолированная VM/namespace, snapshot и независимая консоль; не использовать VORTEX |
 | **staging** | Близкая к production сборка со своими портами/интерфейсами | Не пересекается с TEMPEST 2 и рабочими сервисами |
-| **production / VORTEX** | Финальный сервис | После готовности D, backup, репетиции возврата и отдельного разрешения на cutover |
 
 Переменные и конфигурации: `.env.example` без секретов, `compose.yaml`/`compose.dev.yaml` (можно адаптировать upstream имена постепенно), `config` хранятся отдельно от кода, миграции через Alembic, environment-specific manifests без hardcoded личных IP/путей. Production credentials **не коммитить**.
 
@@ -455,7 +454,7 @@ class IngressAdapter(Protocol):
 - Нагрузочно проверить разумное число одновременных клиентов и устойчивость к отказу одного endpoint.
 - Проверить backup/restore на чистой VM, в том числе ошибки/конфликты.
 
-**Ни один интеграционный тест с root/capabilities не запускать на VORTEX production по умолчанию.** В коммите и отчёте указывать точные команды, результаты и ограничения проверки.
+**Экспериментальные и потенциально опасные сетевые тесты с root/capabilities выполнять только в disposable Linux VM, не на VORTEX production.** Разрешённая операция обслуживания TEMPEST на VORTEX не является разрешением на Apply, dataplane restart, reboot, host firewall/routing или вмешательство в сторонние сервисы. В коммите и отчёте указывать точные команды, результаты и ограничения проверки.
 
 ---
 
@@ -474,7 +473,9 @@ class IngressAdapter(Protocol):
 
 ## 15. Действующий roadmap
 
-2026-11-26: владелец принял checkpoint `93feeab084e2a66e1371e7f503baede6d1f32c6d` в задокументированных границах; A — `ACCEPTED_WITH_LIMITATIONS`. Внешний клиент и публикация UDP ingress проверяются при первом практическом подключении устройства; вторая VM исключительно для формальной приёмки не нужна. Подготовка развёртывания идёт по мере готовности функций, production и изменения сети VORTEX/TYPHOON требуют отдельного разрешения.
+2026-11-26: владелец принял checkpoint `93feeab084e2a66e1371e7f503baede6d1f32c6d` в задокументированных границах; A — `ACCEPTED_WITH_LIMITATIONS`. Внешний клиент и публикация UDP ingress проверяются при первом практическом подключении устройства; вторая VM исключительно для формальной приёмки не нужна. Подготовка развёртывания идёт по мере готовности функций.
+
+**Политика VORTEX, решение владельца 2026-11-28:** VORTEX является production-хостом TEMPEST, а не только pytest-runner. Read-only SSH аудит, диагностика TEMPEST, журналы и состояние служб разрешены. Установка, обновление и обслуживание TEMPEST требуют явного разрешения на соответствующую операцию; после него необходимые ограниченные шаги выполняются автономно. Перед мутацией обязательны защищённая резервная копия и подготовленный rollback. Не выполнять reboot; вмешательство в сторонние сервисы, host firewall, системную маршрутизацию и работающий dataplane требует отдельного разрешения. Секреты, приватные ключи и пользовательские данные не сохранять в Git или логах. Экспериментальная разработка и опасные сетевые тесты остаются только в disposable Linux VM.
 
 Рабочий цикл: сделали → проверили необходимый пользовательский сценарий → работает → идём дальше. Не вводить новые gates и не повторять успешные проверки без изменения соответствующего поведения. Сетевую функцию подтверждать минимальным достаточным реальным end-to-end тестом в разрешённых границах. Текущая задача охватывает следующие приоритеты последовательно, без промежуточной формальной приёмки:
 
@@ -487,7 +488,7 @@ class IngressAdapter(Protocol):
 
 2026-11-28, Working Core UX: API сверяет желаемый Xray plan с активным Agent через существующий `diff` и возвращает доступность результата и изменённые разделы. UI показывает панель только при достоверном непустом diff, автоматически обновляет состояние после операций и периодически для Agent status. Идентичный Apply не создаёт поколение и не перезапускает runtime. Ошибка diff не трактуется как синхронизация; детали тестов и ограничения — в верхней записи [STATUS.md](STATUS.md).
 
-2026-11-28, deployment sync (`58d4f4cd4e5faf04388744475eb933450525bec5`): read-only SSH подтвердил на VORTEX enabled/active network, Xray Agent и panel units, старый `vortex-panel` с Docker restart policy `no` и Caddy proxy target `tempest-working-core-web:8080` при наличии `forward_auth`. Repository получает panel unit, ожидание connectable Agent socket, явный boot-ordering и отдельный installer. Local deployment regressions 23 passed; hosted backend/frontend, safe Compose config/runtime и CodeQL Python + JavaScript/TypeScript pass. Восстановление после reboot не проверялось; текущая Compose directory по Docker labels не содержала Compose manifests во время аудита. Production не изменялся; подробности в [FIRST_VORTEX_DEPLOYMENT.md](FIRST_VORTEX_DEPLOYMENT.md) и [VORTEX_LEGACY_INVENTORY.md](VORTEX_LEGACY_INVENTORY.md).
+2026-11-28, deployment sync (`58d4f4cd4e5faf04388744475eb933450525bec5`): read-only SSH подтвердил на VORTEX enabled/active network, Xray Agent и panel units, старый `vortex-panel` с Docker restart policy `no` и Caddy proxy target `tempest-working-core-web:8080` при наличии `forward_auth`. Repository получает panel unit, ожидание connectable Agent socket, явный boot-ordering и отдельный installer. Local deployment regressions 23 passed; hosted backend/frontend, safe Compose config/runtime и CodeQL Python + JavaScript/TypeScript pass. Восстановление после reboot не проверялось; текущая Compose directory по Docker labels не содержала Compose manifests во время аудита. Это исторический read-only снимок до нового разрешённого deployment; новые фактические результаты записывать отдельно в [FIRST_VORTEX_DEPLOYMENT.md](FIRST_VORTEX_DEPLOYMENT.md) и [VORTEX_LEGACY_INVENTORY.md](VORTEX_LEGACY_INVENTORY.md).
 
 **Единый компактный технический долг** (причина → условие закрытия):
 - AWG runtime и совместимость с фактическими параметрами AWG 3.x ещё не подтверждены → интегрировать готовую реализацию с TCP/UDP, безопасным lifecycle и проверить реальный маршрут.

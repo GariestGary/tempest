@@ -5,13 +5,15 @@ Use the local project environments for fast feedback. GitHub Actions remains an 
 ## Feedback sequence
 
 1. Develop on TORNADO or TYPHOON and run targeted checks on the current OS for each changed behavior.
-2. When relevant and available, run allowlisted safe Linux pytest at an explicit reviewed commit on VORTEX via SSH with `scripts/remote-check.ps1`.
+2. When relevant and available, run allowlisted safe Linux pytest at an explicit reviewed commit on VORTEX via SSH with `scripts/remote-check.ps1`. This is separate from authorized production maintenance.
 3. At an agreed functional checkpoint after an authorized push, use GitHub CI and CodeQL as the independent complete check.
-4. Use a disposable isolated Linux VM only for real nftables, TUN, WireGuard, namespace, and rollback experiments. VORTEX is never a privileged network integration host.
+4. Use a disposable isolated Linux VM for experimental development and potentially dangerous network tests, including real nftables, TUN, WireGuard, namespace, and rollback experiments. VORTEX is the production host, not an experimental network integration host.
 
-## VORTEX remote Linux runner
+## VORTEX production host and remote Linux runner
 
-VORTEX is a working production/home server. Only unprivileged tests of NetworkPlan contracts, NetworkObjectRegistry, fixture-only Linux inventory, AF_UNIX/SO_PEERCRED, and the Agent mode security boundary are allowed. Those tests were inspected for host network mutation and production-service access. AF_UNIX tests use only temporary local Unix sockets and the mock Agent; Agent mode tests mock or reject host operations. The runner does not start TEMPEST, Docker Compose, a systemd unit, or a dataplane. Do not run the full pytest suite there by default.
+VORTEX is the TEMPEST production host. Read-only SSH audits, TEMPEST diagnostics, log review, and service-state checks are allowed. TEMPEST installation, update, and maintenance require explicit owner authorization for the operation. Before each production mutation, create protected backups and prepare rollback. After an operation is authorized, perform its necessary scoped steps autonomously. Never reboot VORTEX. Third-party service changes, host firewall/system routing changes, and changes or restarts to a running dataplane require separate authorization. Keep secrets, private keys, and user data out of Git and logs.
+
+The `scripts/remote-check.ps1` runner remains limited to its allowlisted unprivileged pytest suites at an explicit reviewed SHA. These tests use fixtures, temporary local Unix sockets, and mock/reject host operations. Do not run the full pytest suite on VORTEX by default. Experimental development and potentially dangerous network tests remain confined to a disposable isolated Linux VM.
 
 The repository is `/home/gary/Docker/tempest` on remote `master`. Its `origin` must be `https://github.com/GariestGary/tempest.git`. First-time setup uses a clone and an isolated `backend/.venv` with Python 3.11. If Python 3.11 or `uv` is absent, install them in `/home/gary/.local/share/tempest-tools/` without `sudo`, global Python packages, or persistent PATH changes. The check script performs no dependency installation. Keep the venv between runs.
 
@@ -42,7 +44,7 @@ The runner uses a unique `/tmp` directory, `nice -n 10`, a remote `timeout`, and
 
 **Verified 2026-11-12:** VORTEX is ready as an unprivileged Linux unit-test runner for the allowlisted suites. At `8857b19e0b63e591e4c9c6f9811c41e322130260`, the four selected IPC, NetworkPlan, Agent boundary, and fixture inventory files passed together: 90 passed, 0 failed, 0 skipped. Pytest took 6.19 s; the timed process took 12.48 s with peak RSS 129664 KiB. Preflight reported 10100148 KiB free disk, 2786812 KiB available memory, load 0.21 on 2 CPUs. This establishes the unit-test runner only; no live inventory or network integration was exercised.
 
-Never change DNS, firewall, routes, IP rules, nftables, namespaces, existing containers or services on VORTEX; never use `sudo` for network operations, start TUN/WireGuard/Xray, or install the Agent as a service. Any resource-heavy run requires separate agreement. Real network tests remain in a disposable isolated Linux VM.
+The historical test-runner setup above does not authorize network tests or host changes. For authorized TEMPEST control-plane maintenance, use only the necessary scoped Docker/systemd operations after backups and rollback preparation. Do not change DNS, firewall, routes, IP rules, nftables, namespaces, third-party services, or running dataplane without separate owner authorization. Real network tests remain in a disposable isolated Linux VM.
 
 ## TORNADO / Windows setup
 
