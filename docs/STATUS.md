@@ -2,9 +2,11 @@
 
 ## 2026-11-28 · VORTEX deployment synchronization
 
+Commit: `58d4f4cd4e5faf04388744475eb933450525bec5`.
+
 Read-only SSH confirmed the manually deployed `tempest-wc-panel.service`, boot-enabled network/Xray Agent/panel units, old `vortex-panel` restart policy `no`, and Caddy routing to `tempest-working-core-web:8080` with `forward_auth`. The previous panel unit was not tracked; its Fish socket-file wait is replaced in the repository unit by the existing helper that verifies active Agent plus connectable AF_UNIX socket. Repository boot ordering now places the Xray Agent after topology and makes panel startup require network, Agent and Docker. Added a guarded installer for the three units and helper; it enables boot startup without starting services and refuses to overwrite differing unit/config files.
 
-VORTEX state was not changed. Read-only inspection found the current Compose labels point at a versioned directory whose manifests and Git metadata were absent. Reboot recovery and replay from that directory remain unverified and may fail until the persistent Compose bundle is restored. AWG/client traffic was not retested in this audit. Deployment regression tests: 23 passed; installer `--check`, `bash -n` and `git diff --check` pass. `systemd-analyze verify` could not validate on the development host because its Docker unit and installed `/opt/tempest` executables are absent. Hosted CI/CodeQL will be checked after push.
+VORTEX state was not changed. Read-only inspection found the current Compose labels point at a versioned directory whose manifests and Git metadata were absent. Reboot recovery and replay from that directory remain unverified and may fail until the persistent Compose bundle is restored. AWG/client traffic was not retested in this audit. Deployment regression tests: 23 passed; installer `--check`, `bash -n` and `git diff --check` pass. `systemd-analyze verify` could not validate on the development host because its Docker unit and installed `/opt/tempest` executables are absent. Hosted backend, frontend, safe Compose config/runtime and Python + JavaScript/TypeScript CodeQL all passed for this commit.
 
 ## 2026-11-28 · Working Core — состояние синхронизации конфигурации
 
