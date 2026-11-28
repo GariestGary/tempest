@@ -12,7 +12,13 @@ root-only backup SQLite и конфигурации, сборка API/UI до з
 запущенных контейнера уже используют bundle `daf4b070`, вопреки исходному
 снимку `a4aee115`; текущий путь panel unit не прочитан. Updater откажет,
 если путь unit и Docker labels расходятся. Секреты не читались.
-CI/CodeQL для нового SHA проверяются после публикации. Dataplane не менялся.
+Кодовый checkpoint `2b4be9f5df26d7174f6ae924157649e2614149cb` опубликован;
+[Hosted CI](https://github.com/GariestGary/tempest/actions/runs/46157962963)
+(backend, frontend, Compose config/runtime smoke) и
+[CodeQL](https://github.com/GariestGary/tempest/actions/runs/46157963116)
+завершились успешно. Публичный GitHub API без токена подтвердил оба успешных
+push-run для точного SHA. CI/CodeQL для этого документационного коммита — после
+его публикации. Dataplane не менялся.
 
 ## 2026-11-28 · Working Core — каталог выходов
 
