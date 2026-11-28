@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { Boxes, Cable, ChevronLeft, CircleUserRound, LayoutDashboard, LogOut, Menu, Route, Settings2, ShieldCheck, UsersRound, Plus, X } from 'lucide-react'
+import { Cable, ChevronLeft, CircleUserRound, Folder, LayoutDashboard, LogOut, Menu, Route, Settings2, ShieldCheck, UsersRound, Plus, X } from 'lucide-react'
 import './working-core.css'
 import { Select, ActionMenu, DecisionDialog } from './WorkingCoreControls'
 import { useQuery } from '@tanstack/react-query'
@@ -66,6 +66,24 @@ function ActionDialog({ title, children, error, notice, busy, clearError, trigge
       <div className="wc-dialog-content">{open && error && <p role="alert" className="wc-dialog-error">{error}</p>}{open && notice && <p role="status" className="wc-dialog-success">{notice}</p>}{open && busy && <p role="status">Выполняется запрос…</p>}{children}</div>
     </dialog>
   </>
+}
+
+function MoveDialog({ item, providers, busy, onCancel, onMove }: {
+  item: { name: string; provider_id: string | null }; providers: Provider[]; busy: boolean
+  onCancel: () => void; onMove: (providerId: string | null) => void
+}) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  const [target, setTarget] = useState(item.provider_id ?? '')
+  useEffect(() => { if (dialog.current?.showModal) dialog.current.showModal(); else dialog.current?.setAttribute('open', '') }, [])
+  return <dialog ref={dialog} className="wc-dialog" aria-label={`Перенести ${item.name}`} onCancel={event => { event.preventDefault(); onCancel() }}>
+    <div className="wc-dialog-head"><h2>Перенести «{item.name}»</h2><button type="button" className="wc-dialog-close" aria-label="Закрыть" onClick={onCancel}>×</button></div>
+    <div className="wc-dialog-content"><label>Расположение
+      <select aria-label="Новое расположение" className={field} value={target} onChange={event => setTarget(event.target.value)}>
+        <option value="" disabled={item.provider_id === null}>Корень каталога{item.provider_id === null ? ' · текущее' : ''}</option>
+        {providers.map(provider => <option key={provider.id} value={provider.id} disabled={provider.id === item.provider_id}>{provider.name}{provider.id === item.provider_id ? ' · текущее' : ''}</option>)}
+      </select>
+    </label><div className="wc-decision-actions"><button type="button" className="wc-secondary-button" onClick={onCancel}>Отмена</button><button type="button" className="wc-decision-confirm" disabled={busy || target === (item.provider_id ?? '')} onClick={() => onMove(target || null)}>Перенести</button></div></div>
+  </dialog>
 }
 
 function value(form: FormData, key: string) {
@@ -148,8 +166,9 @@ type SubscriptionPreview = {
   results: { line: number; status: keyof typeof importStatuses; name?: string; security?: VlessSecurity }[]
 }
 
-function SubscriptionImport({ providers, revision, busy, error, notice, clearError, run }: {
+function SubscriptionImport({ providers, currentProvider, revision, busy, error, notice, clearError, run }: {
   providers: Provider[]
+  currentProvider: string | null
   revision: number
   busy: boolean
   error: string
@@ -158,6 +177,8 @@ function SubscriptionImport({ providers, revision, busy, error, notice, clearErr
   run: (operation: () => Promise<string>) => Promise<void>
 }) {
   const [mode, setMode] = useState<'content' | 'url'>('content')
+  const [providerSelection, setProviderSelection] = useState('')
+  const newFolder = providerSelection === '__new__'
   const [preview, setPreview] = useState<(SubscriptionPreview & { providerId: string }) | null>(null)
   const ready = preview?.results.filter(item => item.status === 'ready').length ?? 0
 
@@ -165,9 +186,16 @@ function SubscriptionImport({ providers, revision, busy, error, notice, clearErr
     event.preventDefault()
     const form = event.currentTarget
     const body = new FormData(form)
-    const providerId = value(body, 'subscriptionProvider')
+    let providerId = currentProvider ?? providerSelection
     setPreview(null)
     void run(async () => {
+      let previewRevision = revision
+      if (!currentProvider && newFolder) {
+        const created = await http.post<{ id: string }>('/core/providers', { revision, name: value(body, 'newFolderName') })
+        providerId = created.data.id
+        previewRevision += 1
+        setProviderSelection(providerId)
+      }
       const dialIps = Object.fromEntries(value(body, 'dialIps').split(/\r?\n/).filter(line => line.trim()).map(line => {
         const [host, address, ...extra] = line.trim().split(/\s+/)
         if (!address || extra.length) throw new Error('invalid dial IP mapping')
@@ -175,7 +203,7 @@ function SubscriptionImport({ providers, revision, busy, error, notice, clearErr
       }))
       const result = (await http.post<SubscriptionPreview>(
         `/core/providers/${providerId}/subscription/preview`,
-        { revision, [mode]: value(body, 'subscriptionSource'), dial_ips: dialIps },
+        { revision: previewRevision, [mode]: value(body, 'subscriptionSource'), dial_ips: dialIps },
       )).data
       const source = form.elements.namedItem('subscriptionSource') as HTMLInputElement | HTMLTextAreaElement
       source.value = ''
@@ -187,10 +215,12 @@ function SubscriptionImport({ providers, revision, busy, error, notice, clearErr
   return <ActionDialog triggerId="add-subscription" title="Импорт подписки VLESS" busy={busy} error={error} notice={notice} clearError={clearError}>
     <form className="mt-3" onSubmit={showPreview} onChange={() => setPreview(null)}>
       <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
-        <label>Провайдер для импорта<Select aria-label="Провайдер для импорта" name="subscriptionProvider" className={field} required defaultValue="">
-          <option value="" disabled>Выберите провайдера</option>
+        {!currentProvider && <label>Папка для импорта<Select aria-label="Папка для импорта" name="subscriptionProvider" className={field} required value={providerSelection} onChange={event => setProviderSelection(event.target.value)}>
+          <option value="" disabled>Выберите папку</option>
           {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
-        </Select></label>
+          <option value="__new__">Создать новую папку</option>
+        </Select></label>}
+        {!currentProvider && newFolder && <label>Название новой папки<input name="newFolderName" className={field} maxLength={64} required /></label>}
         <label>Источник<Select aria-label="Источник" className={field} value={mode} onChange={event => setMode(event.target.value === 'url' ? 'url' : 'content')}>
           <option value="content">Текст или Base64</option>
           <option value="url">HTTPS-ссылка</option>
@@ -248,7 +278,9 @@ export function WorkingCore() {
   const [mobileNav, setMobileNav] = useState(false)
   const [search, setSearch] = useState('')
   const [protocolFilter, setProtocolFilter] = useState('all')
-  const [providerFilter, setProviderFilter] = useState('all')
+  const [folderId, setFolderId] = useState<string | null>(null)
+  const [sort, setSort] = useState<'name' | 'name-desc'>('name')
+  const [moving, setMoving] = useState<{ id: string; name: string; kind: 'awg' | 'vless'; provider_id: string | null } | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
@@ -337,7 +369,7 @@ export function WorkingCore() {
     void run(async () => {
       await http.post('/core/egresses', {
         revision: data.revision, name: value(body, 'name'),
-        provider_id: value(body, 'provider') || null,
+        provider_id: folderId,
         ...(savedManual
           ? { config: manualVless(body) }
           : { uri: { uri: value(body, 'uri'), dial_address: value(body, 'address') || null } }),
@@ -376,9 +408,13 @@ export function WorkingCore() {
     ...(data?.saved_egresses ?? []).map(item => ({ ...item, kind: 'vless' as const })),
     ...(data?.vless && !data.selected_egress_id ? [{ id: 'direct-vless', name: 'Прямой VLESS', provider_id: null, kind: 'direct' as const }] : []),
   ]
-  const filteredEgresses = egressRows.filter(item => item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) &&
-    (protocolFilter === 'all' || (protocolFilter === 'awg' ? item.kind === 'awg' : item.kind !== 'awg')) &&
-    (providerFilter === 'all' || (providerFilter === 'none' ? !item.provider_id : item.provider_id === providerFilter)))
+  const filteredEgresses = egressRows.filter(item => (item.provider_id ?? null) === folderId && item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) &&
+    (protocolFilter === 'all' || (protocolFilter === 'awg' ? item.kind === 'awg' : item.kind !== 'awg')))
+    .sort((a, b) => (sort === 'name' ? 1 : -1) * a.name.localeCompare(b.name, 'ru'))
+  const folders = (data?.providers ?? []).filter(item => !folderId && item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
+    .sort((a, b) => (sort === 'name' ? 1 : -1) * a.name.localeCompare(b.name, 'ru'))
+  const currentFolder = data?.providers?.find(item => item.id === folderId)
+  useEffect(() => { if (data && folderId && !currentFolder) setFolderId(null) }, [data, folderId, currentFolder])
   const previewCurrent = Boolean(diff && data && diff.revision === data.revision && agent && diff.base_generation === agent.active_generation)
   const syncLabel = !data ? '' : applyError || syncState === 'apply_error' ? 'Ошибка применения' : ({
     synced: 'Все изменения применены',
@@ -404,7 +440,7 @@ export function WorkingCore() {
         <div className="wc-nav-label">УПРАВЛЕНИЕ</div>
         <nav aria-label="Основная навигация" className="wc-nav">
           {([
-            ['overview', 'Обзор', LayoutDashboard], ['providers', 'Провайдеры', Boxes],
+            ['overview', 'Обзор', LayoutDashboard],
             ['egress', 'Выходы', Cable], ['routing', 'Маршрутизация', Route],
             ['clients', 'Клиенты', UsersRound], ['settings', 'Настройки', Settings2],
           ] as const).map(([id, label, Icon]) => <button key={id as string} type="button" title={label as string}
@@ -418,12 +454,12 @@ export function WorkingCore() {
       <div className="wc-workspace">
         <header className="wc-topbar">
           <button className="wc-menu" onClick={() => setMobileNav(!mobileNav)} aria-label="Открыть меню"><Menu size={20} /></button>
-          <div className="wc-breadcrumb"><span>TEMPEST</span><span className="wc-slash">/</span><strong>{({ overview: 'Обзор', providers: 'Провайдеры', egress: 'Выходы', routing: 'Маршрутизация', clients: 'Клиенты', settings: 'Настройки' } as Record<string, string>)[page]}</strong></div>
+          <div className="wc-breadcrumb"><span>TEMPEST</span><span className="wc-slash">/</span>{page === 'egress' && currentFolder ? <><button type="button" onClick={() => setFolderId(null)}>Выходы</button><span className="wc-slash">/</span><strong>{currentFolder.name}</strong></> : <strong>{({ overview: 'Обзор', egress: 'Выходы', routing: 'Маршрутизация', clients: 'Клиенты', settings: 'Настройки' } as Record<string, string>)[page]}</strong>}</div>
           <div className="wc-top-actions">{import.meta.env.VITE_MOCK_PREVIEW === '1' && <span className="wc-mock-label">МОК · изменения не сохраняются</span>}<span className={`wc-agent ${agent && !isError ? 'online' : ''}`}><i />{!data ? 'Статус Agent неизвестен' : isError || !agent ? 'Agent недоступен' : 'Agent подключён'}</span><button type="button" className="wc-account" onClick={() => setPage('settings')} aria-label="Настройки учётной записи"><CircleUserRound size={19}/></button><button type="button" className="wc-account" aria-label="Выйти" onClick={() => { localStorage.removeItem('pitun_token'); window.location.assign('/login') }}><LogOut size={18}/></button></div>
         </header>
         <main className="wc-main" id="main-content">
           <div className="wc-content">
-            <div className="wc-page-heading"><div><h1>{({ overview: 'Обзор системы', providers: 'Провайдеры', egress: 'Исходящие подключения', routing: 'Маршрутизация', clients: 'Клиенты WireGuard', settings: 'Настройки' } as Record<string, string>)[page]}</h1><p>{({ overview: 'Состояние шлюза и управление конфигурацией', providers: 'Организуйте подключения по провайдерам', egress: 'Управляйте каталогом и выбором VPN-выхода', routing: 'Определите, куда направлять трафик', clients: 'Управляйте доступом ваших устройств', settings: 'Учётная запись и доступ к панели' } as Record<string, string>)[page]}</p></div></div>
+            <div className="wc-page-heading"><div><h1>{({ overview: 'Обзор системы', egress: 'Исходящие подключения', routing: 'Маршрутизация', clients: 'Клиенты WireGuard', settings: 'Настройки' } as Record<string, string>)[page]}</h1><p>{({ overview: 'Состояние шлюза и управление конфигурацией', egress: 'Управляйте каталогом и выбором VPN-выхода', routing: 'Определите, куда направлять трафик', clients: 'Управляйте доступом ваших устройств', settings: 'Учётная запись и доступ к панели' } as Record<string, string>)[page]}</p></div></div>
             <div className="wc-settings-only"><div className="wc-settings-card"><h2>Учётная запись</h2><p>Обновите пароль для входа в панель управления.</p><button className={secondary} onClick={() => setChangePassword(!changePassword)}>Сменить пароль</button></div></div>
         {changePassword && page === 'settings' && <form className={panel} onSubmit={event => {
           event.preventDefault()
@@ -504,41 +540,27 @@ export function WorkingCore() {
           </section>
 
           <section className={`${panel} wc-catalog`} aria-labelledby="saved-egresses-heading">
-            <h2 id="saved-egresses-heading" className="wc-sr-only">{page === 'providers' ? 'Ваши провайдеры' : 'Каталог выходов'}</h2>
-            <div className="wc-providers-only"><div className="wc-toolbar"><label className="wc-search">Поиск<input type="search" placeholder="Название провайдера" value={search} onChange={event => setSearch(event.target.value)} /></label><ActionDialog busy={busy} error={error} notice={notice} clearError={() => { setError(''); setNotice('') }} title="Добавить провайдера"><form onSubmit={event => {
-              event.preventDefault()
-              const form = event.currentTarget
-              const name = value(new FormData(form), 'providerName')
-              void run(async () => {
-                await http.post('/core/providers', { revision: data.revision, name })
-                form.reset()
-                return 'Провайдер добавлен.'
-              })
-            }} className="flex flex-wrap items-end gap-2">
-              <label>Название провайдера<input name="providerName" className={field} maxLength={64} required /></label>
-              <button className={secondary} disabled={busy}>Добавить провайдера</button>
-            </form>
-            </ActionDialog></div>
-            {!!data.providers?.length && <div className="wc-table-wrap"><table className="wc-table"><thead><tr><th>Провайдер</th><th>Выходы</th><th>Действия</th></tr></thead><tbody>{data.providers.filter(provider => provider.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(provider => <tr key={provider.id}>
-              <td><strong>{provider.name}</strong></td><td>{[...(data.saved_egresses ?? []), ...(data.saved_awg_egresses ?? [])].filter(item => item.provider_id === provider.id).length}</td><td><ActionMenu label={`Действия провайдера ${provider.name}`} actions={[
-              { label: 'Переименовать', disabled: busy, onSelect: () => setDecision({ title: 'Переименовать провайдера', body: 'Укажите новое название.', initial: provider.name, confirm: name => { void run(async () => { await http.put(`/core/providers/${provider.id}`, { revision: data.revision, name }); return 'Провайдер переименован.' }) } }) },
-              { label: 'Удалить провайдера', danger: true, disabled: busy || [...(data.saved_egresses ?? []), ...(data.saved_awg_egresses ?? [])].some(item => item.provider_id === provider.id), onSelect: () => setDecision({ title: 'Удалить провайдера?', body: `Провайдер «${provider.name}» будет удалён.`, confirm: () => { void run(async () => { await http.delete(`/core/providers/${provider.id}`, { data: { revision: data.revision } }); return 'Провайдер удалён.' }) } }) },
-            ]}/></td></tr>)}</tbody></table></div>}
-            {!!data.providers?.length && search && data.providers.every(provider => !provider.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())) && <p className="wc-empty">По вашему запросу провайдеры не найдены.</p>}
-            {!data.providers?.length && <p className="wc-empty">Провайдеров пока нет. Добавьте первого, чтобы упорядочить выходы.</p>}</div>
+            <h2 id="saved-egresses-heading" className="wc-sr-only">Каталог выходов</h2>
             <div className="wc-egress-only">
+              {currentFolder && <div className="wc-folder-path"><button type="button" onClick={() => setFolderId(null)}><ChevronLeft size={16}/>Назад к выходам</button><span>Выходы / {currentFolder.name}</span></div>}
               <div className="wc-toolbar">
                 <label className="wc-search">Поиск<input type="search" placeholder="Название выхода" value={search} onChange={event => setSearch(event.target.value)} /></label>
                 <label>Протокол<Select aria-label="Фильтр по протоколу" value={protocolFilter} onChange={event => setProtocolFilter(event.target.value)}><option value="all">Все протоколы</option><option value="awg">AWG</option><option value="vless">VLESS</option></Select></label>
-                <label>Провайдер<Select aria-label="Фильтр по провайдеру" value={providerFilter} onChange={event => setProviderFilter(event.target.value)}><option value="all">Все провайдеры</option><option value="none">Без провайдера</option>{data.providers?.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</Select></label>
-                <ActionMenu label="Добавить выход" text="Добавить выход" actions={[
-                  { label: 'Импорт AWG', onSelect: () => document.getElementById('add-awg')?.click() },
+                <label>Сортировка<Select aria-label="Сортировка каталога" value={sort} onChange={event => setSort(event.target.value as 'name' | 'name-desc')}><option value="name">По имени А–Я</option><option value="name-desc">По имени Я–А</option></Select></label>
+                <ActionMenu label="Добавить" text="Добавить" actions={[
+                  { label: 'Создать папку', onSelect: () => document.getElementById('add-folder')?.click() },
+                  { label: 'Добавить AWG', onSelect: () => document.getElementById('add-awg')?.click() },
                   { label: 'Добавить VLESS', onSelect: () => document.getElementById('add-vless')?.click() },
-                  { label: 'Импорт подписки', disabled: !data.providers?.length, onSelect: () => document.getElementById('add-subscription')?.click() },
-                  { label: 'Прямой VLESS', onSelect: () => document.getElementById('edit-direct-vless')?.click() },
+                  { label: 'Импортировать подписку', onSelect: () => document.getElementById('add-subscription')?.click() },
                 ]}/>
               </div>
-              {!!data.providers?.length && <SubscriptionImport providers={data.providers} revision={data.revision} busy={busy} error={error} notice={notice} clearError={() => { setError(''); setNotice('') }} run={run} />}
+              <ActionDialog triggerId="add-folder" busy={busy} error={error} notice={notice} clearError={() => { setError(''); setNotice('') }} title="Создать папку"><form onSubmit={event => {
+                event.preventDefault()
+                const form = event.currentTarget
+                const name = value(new FormData(form), 'folderName')
+                void run(async () => { await http.post('/core/providers', { revision: data.revision, name }); form.reset(); return 'Папка создана.' })
+              }}><label>Название папки<input name="folderName" className={field} maxLength={64} required /></label><button className={primary} disabled={busy}>Создать</button></form></ActionDialog>
+              <SubscriptionImport providers={data.providers ?? []} currentProvider={folderId} revision={data.revision} busy={busy} error={error} notice={notice} clearError={() => { setError(''); setNotice('') }} run={run} />
             <ActionDialog triggerId="add-awg" busy={busy} error={error} notice={notice} clearError={() => { setError(''); setNotice('') }} title="Импортировать AWG"><form onChange={() => setAwgPreview(null)} onSubmit={event => {
               event.preventDefault()
               const form = event.currentTarget
@@ -549,7 +571,7 @@ export function WorkingCore() {
                 const config = await file.text()
                 await http.post('/core/awg-egresses', {
                   revision: data.revision, name: value(body, 'awgName'),
-                  provider_id: value(body, 'awgProvider') || null, config,
+                  provider_id: folderId, config,
                 })
                 form.reset()
                 setAwgFileName('')
@@ -560,7 +582,6 @@ export function WorkingCore() {
               <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
                 <legend>Импорт AmneziaWG</legend>
                 <label>Название AWG<input name="awgName" className={field} maxLength={64} required /></label>
-                <label>Провайдер AWG<Select aria-label="Провайдер AWG" name="awgProvider" className={field} defaultValue=""><option value="">Без провайдера</option>{data.providers?.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</Select></label>
                 <label className="wc-file">Файл AWG .conf<input name="awgFile" className={field} type="file" accept=".conf" required onChange={event => setAwgFileName(event.target.files?.[0]?.name ?? '')} /><span>{awgFileName || 'Выберите файл .conf'}</span></label>
                 <button type="button" className={secondary} onClick={event => {
                   const form = event.currentTarget.form
@@ -586,7 +607,6 @@ export function WorkingCore() {
             <ActionDialog triggerId="add-vless" busy={busy} error={error} notice={notice} clearError={() => { setError(''); setNotice('') }} title="Добавить VLESS в каталог"><form onSubmit={addSavedEgress}>
               <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
                 <label>Название<input name="name" className={field} maxLength={64} required /></label>
-                <label>Провайдер<Select aria-label="Провайдер" name="provider" className={field} defaultValue=""><option value="">Без провайдера</option>{data.providers?.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</Select></label>
                 <label>Способ добавления выхода<Select aria-label="Способ добавления выхода" className={field} value={savedManual ? 'manual' : 'uri'}
                   onChange={event => setSavedManual(event.target.value === 'manual')}>
                   <option value="uri">Импорт ссылки</option><option value="manual">Ручной ввод</option>
@@ -615,14 +635,24 @@ export function WorkingCore() {
                 </fieldset>
               </form>
               </ActionDialog>
-              {egressRows.length ? <div className="wc-table-wrap"><table className="wc-table wc-egress-table"><thead><tr><th>Выход</th><th>Протокол</th><th>Провайдер</th><th>Состояние</th><th>Действия</th></tr></thead><tbody>
+              {(folders.length > 0 || filteredEgresses.length > 0) ? <div className="wc-table-wrap"><table className="wc-table wc-egress-table"><thead><tr><th>Название</th><th>Протокол</th><th>Расположение</th><th>Состояние</th><th>Действия</th></tr></thead><tbody>
+                {folders.map(folder => {
+                  const contents = egressRows.filter(item => item.provider_id === folder.id)
+                  return <tr key={`folder-${folder.id}`}>
+                    <td><button type="button" className="wc-folder-name" onClick={() => { setFolderId(folder.id); setSearch('') }}><Folder size={18}/><strong>{folder.name}</strong></button></td>
+                    <td>Папка</td><td>{contents.length} подключений</td>
+                    <td><div className="wc-status-stack">{contents.some(item => item.id === agent?.active_egress_id) && <span className="wc-badge wc-badge-success">Есть активный выход</span>}{contents.some(item => item.id === data.selected_egress_id) && <span className="wc-badge wc-badge-draft">Есть выбранный выход</span>}</div></td>
+                    <td><ActionMenu label={`Действия папки ${folder.name}`} actions={[
+                      { label: 'Открыть', onSelect: () => { setFolderId(folder.id); setSearch('') } },
+                      { label: 'Переименовать', disabled: busy, onSelect: () => setDecision({ title: 'Переименовать папку', body: 'Укажите новое название.', initial: folder.name, confirm: name => { void run(async () => { await http.put(`/core/providers/${folder.id}`, { revision: data.revision, name }); return 'Папка переименована.' }) } }) },
+                      { label: 'Удалить', danger: true, disabled: busy, onSelect: () => setDecision({ title: 'Удалить папку?', body: contents.length ? `Все ${contents.length} выхода будут перемещены в корень. Подключения сохранятся.` : `Пустая папка «${folder.name}» будет удалена.`, confirm: () => { void run(async () => { await http.delete(`/core/providers/${folder.id}`, { data: { revision: data.revision, move_egresses_to_root: contents.length > 0 } }); return 'Папка удалена.' }) } }) },
+                    ]}/></td>
+                  </tr>
+                })}
                 {filteredEgresses.map(item => <tr key={`${item.kind}-${item.id}`}>
                   <td><strong>{item.name}</strong>{item.kind === 'direct' && <small>{data.vless?.server_name} · {data.vless?.address}:{data.vless?.port}</small>}</td>
                   <td>{item.kind === 'awg' ? 'AWG' : `VLESS${item.kind === 'vless' ? ` · ${securityLabel(item.security)}` : ''}`}</td>
-                  <td>{item.kind === 'vless' ? <Select aria-label={`Провайдер выхода «${item.name}»`} value={item.provider_id ?? ''} disabled={busy} onChange={event => {
-                    const provider_id = event.target.value || null
-                    void run(async () => { await http.put(`/core/egresses/${item.id}/provider`, { revision: data.revision, provider_id }); return 'Провайдер выхода изменён.' })
-                  }}><option value="">Без провайдера</option>{data.providers?.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</Select> : (data.providers?.find(provider => provider.id === item.provider_id)?.name ?? 'Без провайдера')}</td>
+                  <td>{currentFolder?.name ?? 'Корень каталога'}</td>
                   <td><div className="wc-status-stack">{!isError && (item.kind === 'direct'
                     ? Boolean(agent?.active_generation && data.sync_diff_available && !data.selected_egress_id && data.vless && !syncSections.includes('vless'))
                     : agent?.active_egress_id === item.id) && <span className="wc-badge wc-badge-success">Активен</span>}
@@ -632,15 +662,17 @@ export function WorkingCore() {
                     {item.kind === 'awg' && agent?.active_egress_id === item.id && agent.egress_checked_epoch_ms && <small>Проверка: {new Date(agent.egress_checked_epoch_ms).toLocaleString('ru-RU')}</small>}
                   </div></td>
                   <td>{item.kind === 'awg' ? <ActionMenu label={`Действия выхода ${item.name}`} actions={[
+                    { label: 'Перенести в…', disabled: busy, onSelect: () => setMoving(item) },
                     ...(agent?.active_egress_id === item.id ? [{ label: 'Проверить AWG', disabled: busy || Boolean(pending), onSelect: () => { void run(async () => { const status = (await http.post<Agent>('/core/awg-egresses/probe')).data; return status.egress_state === 'unavailable' ? 'Последняя проверка AWG не прошла.' : 'Контрольная проверка AWG прошла.' }) } }] : []),
                     { label: 'Выбрать AWG', disabled: busy || data.selected_egress_id === item.id, onSelect: () => { void run(async () => { await http.post(`/core/awg-egresses/${item.id}/select`, { revision: data.revision }); return 'AWG выбран в черновике; требуется просмотр и применение.' }) } },
                     { label: 'Удалить AWG', danger: true, disabled: busy || data.selected_egress_id === item.id, onSelect: () => setDecision({ title: 'Удалить выход?', body: `Выход «${item.name}» будет удалён из каталога.`, confirm: () => { void run(async () => { await http.delete(`/core/awg-egresses/${item.id}`, { data: { revision: data.revision } }); return 'AWG-конфигурация удалена.' }) } }) },
                   ]}/> : item.kind === 'vless' ? <ActionMenu label={`Действия выхода ${item.name}`} actions={[
+                    { label: 'Перенести в…', disabled: busy, onSelect: () => setMoving(item) },
                     { label: 'Выбрать', disabled: busy || item.id === data.selected_egress_id, onSelect: () => { void run(async () => { await http.post(`/core/egresses/${item.id}/select`, { revision: data.revision }); return 'Выход выбран в черновике. Проверьте и примените изменения.' }) } },
                     { label: 'Удалить', danger: true, disabled: busy || item.id === data.selected_egress_id, onSelect: () => setDecision({ title: 'Удалить выход?', body: `Выход «${item.name}» будет удалён из каталога.`, confirm: () => { void run(async () => { await http.delete(`/core/egresses/${item.id}`, { data: { revision: data.revision } }); return 'Выход удалён.' }) } }) },
                   ]}/> : <ActionMenu label="Действия прямого VLESS" actions={[{ label: 'Изменить', onSelect: () => document.getElementById('edit-direct-vless')?.click() }]}/>}</td>
                 </tr>)}
-              </tbody></table>{!filteredEgresses.length && <p className="wc-empty">По вашему запросу выходы не найдены.</p>}</div> : <p className="wc-empty">Выходов пока нет. Добавьте AWG или VLESS.</p>}
+              </tbody></table></div> : <p className="wc-empty">{search || protocolFilter !== 'all' ? 'По вашему запросу ничего не найдено.' : currentFolder ? 'В папке пока нет выходов. Добавьте AWG или VLESS.' : 'Каталог пуст. Создайте папку или добавьте AWG/VLESS.'}</p>}
             </div>
           </section>
           <div className="wc-secondary-sections">
@@ -699,6 +731,11 @@ export function WorkingCore() {
         </aside>}
       </div>
       {decision && <DecisionDialog key={`${decision.title}-${decision.initial ?? decision.body}`} title={decision.title} body={decision.body} initial={decision.initial} onCancel={() => setDecision(null)} onConfirm={value => { const action = decision.confirm; setDecision(null); action(value) }}/>}
+      {moving && <MoveDialog item={moving} providers={data?.providers ?? []} busy={busy} onCancel={() => setMoving(null)} onMove={provider_id => {
+        const item = moving
+        setMoving(null)
+        void run(async () => { await http.put(`/core/${item.kind === 'awg' ? 'awg-egresses' : 'egresses'}/${item.id}/provider`, { revision: data!.revision, provider_id }); return 'Выход перемещён.' })
+      }}/>}
     </div>
   )
 }

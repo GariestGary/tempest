@@ -11,6 +11,7 @@ from sqlmodel import select
 from app import database, working_core
 from app.core.working_core import Draft
 from app.models import Settings
+from app.network_agent.models import AgentStatus
 from tests.test_working_core import PASSWORD, VLESS_ID, deployment
 
 
@@ -211,3 +212,52 @@ async def test_awg_import_rejects_malformed_structure_without_echoing_secrets(ca
     assert response.status_code == 422
     assert 'secret-value' not in response.text
     assert (await http.get('/api/core')).json()['revision'] == 0
+
+@pytest.mark.asyncio
+async def test_folder_moves_are_atomic_metadata_and_revision_bound(catalog_http, session):
+    http = catalog_http
+    await authenticate(http)
+    first = (await http.post('/api/core/providers', json={'revision': 0, 'name': 'First'})).json()['id']
+    second = (await http.post('/api/core/providers', json={'revision': 1, 'name': 'Second'})).json()['id']
+    uri = f'vless://{VLESS_ID}@egress.poc.test:8443?security=tls&type=tcp'
+    vless = (await http.post('/api/core/egresses', json={
+        'revision': 2, 'name': 'VLESS', 'provider_id': first,
+        'uri': {'uri': uri, 'dial_address': '192.0.2.20'},
+    })).json()['id']
+    private = base64.b64encode(b'\x01' * 32).decode()
+    config = (f'[Interface]\nPrivateKey = {private}\nAddress = 10.0.0.2/32\nDNS = 1.1.1.1\n'
+              f'Jc = 4\n[Peer]\nPublicKey = {private}\nEndpoint = 192.0.2.123:1234\n'
+              'AllowedIPs = 0.0.0.0/0\n')
+    awg = (await http.post('/api/core/awg-egresses', json={
+        'revision': 3, 'name': 'AWG', 'provider_id': first, 'config': config,
+    })).json()['id']
+    assert (await http.post(f'/api/core/awg-egresses/{awg}/select', json={'revision': 4})).status_code == 204
+    before = (await http.get('/api/core')).json()
+    session.expire_all()
+    before_draft = Draft.model_validate_json(session.exec(select(Settings).where(Settings.key == working_core._DRAFT_KEY)).one().value)
+    idle = AgentStatus(state='idle', active_generation=0, last_known_good_generation=0)
+    before_plan = working_core._plan(before_draft, working_core._load_vless(before_draft), idle)
+    assert (await http.put(f'/api/core/awg-egresses/{awg}/provider', json={'revision': 4, 'provider_id': second})).status_code == 409
+    assert (await http.put(f'/api/core/awg-egresses/{awg}/provider', json={'revision': 5, 'provider_id': second})).status_code == 204
+    assert (await http.put(f'/api/core/egresses/{vless}/provider', json={'revision': 6, 'provider_id': second})).status_code == 204
+    assert (await http.request('DELETE', f'/api/core/providers/{second}', json={'revision': 7})).status_code == 409
+    assert (await http.request('DELETE', f'/api/core/providers/{second}', json={
+        'revision': 6, 'move_egresses_to_root': True,
+    })).status_code == 409
+    assert (await http.request('DELETE', f'/api/core/providers/{second}', json={
+        'revision': 7, 'move_egresses_to_root': True,
+    })).status_code == 204
+    after = (await http.get('/api/core')).json()
+    session.expire_all()
+    after_draft = Draft.model_validate_json(session.exec(select(Settings).where(Settings.key == working_core._DRAFT_KEY)).one().value)
+    assert working_core._plan(after_draft, working_core._load_vless(after_draft), idle).model_dump(exclude={'generation_id'}) == before_plan.model_dump(exclude={'generation_id'})
+    assert after['selected_egress_id'] == before['selected_egress_id'] == awg
+    assert after['saved_awg_egresses'][0]['id'] == awg
+    assert after['saved_egresses'][0]['id'] == vless
+    assert after['saved_awg_egresses'][0]['provider_id'] is None
+    assert after['saved_egresses'][0]['provider_id'] is None
+    assert [item['id'] for item in after['providers']] == [first]
+    # The metadata paths never ask Agent to stage, apply, or create a generation.
+    assert after['agent'] is None and before['agent'] is None
+    assert after['sync_sections'] == before['sync_sections'] == []
+    assert (await http.request('DELETE', f'/api/core/providers/{first}', json={'revision': 8})).status_code == 204

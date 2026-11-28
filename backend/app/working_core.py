@@ -364,6 +364,10 @@ class EgressAssignment(DraftRevision):
     provider_id: UUID | None = None
 
 
+class ProviderRemoval(DraftRevision):
+    move_egresses_to_root: bool = False
+
+
 @app.post("/api/core/providers", status_code=201, dependencies=_authenticated)
 async def create_provider(body: ProviderEdit, session: AsyncSession = Depends(get_session)):
     async with app.state.change_lock:
@@ -388,15 +392,21 @@ async def rename_provider(provider_id: UUID, body: ProviderEdit, session: AsyncS
 
 
 @app.delete("/api/core/providers/{provider_id}", status_code=204, dependencies=_authenticated)
-async def delete_provider(provider_id: UUID, body: DraftRevision, session: AsyncSession = Depends(get_session)):
+async def delete_provider(provider_id: UUID, body: ProviderRemoval, session: AsyncSession = Depends(get_session)):
     async with app.state.change_lock:
         draft, row = await _draft(session)
         _check_revision(body.revision, draft)
         if not any(item.id == provider_id for item in draft.providers):
             raise HTTPException(404, "Provider not found")
-        if any(item.provider_id == provider_id for item in (*draft.saved_egresses, *draft.saved_awg_egresses)):
+        occupied = any(item.provider_id == provider_id for item in (*draft.saved_egresses, *draft.saved_awg_egresses))
+        if occupied and not body.move_egresses_to_root:
             raise HTTPException(409, "Move or delete the provider's exits first")
-        await _save(session, draft, row, providers=tuple(item for item in draft.providers if item.id != provider_id))
+        await _save(
+            session, draft, row,
+            providers=tuple(item for item in draft.providers if item.id != provider_id),
+            saved_egresses=tuple(item.model_copy(update={"provider_id": None}) if item.provider_id == provider_id else item for item in draft.saved_egresses),
+            saved_awg_egresses=tuple(item.model_copy(update={"provider_id": None}) if item.provider_id == provider_id else item for item in draft.saved_awg_egresses),
+        )
 
 
 class SubscriptionPreviewRequest(DraftRevision):
@@ -540,6 +550,19 @@ async def assign_provider(egress_id: UUID, body: EgressAssignment, session: Asyn
             raise HTTPException(404, "Provider not found")
         exits = tuple(item.model_copy(update={"provider_id": body.provider_id}) if item.id == egress_id else item for item in draft.saved_egresses)
         await _save(session, draft, row, saved_egresses=exits)
+
+
+@app.put("/api/core/awg-egresses/{egress_id}/provider", status_code=204, dependencies=_authenticated)
+async def assign_awg_provider(egress_id: UUID, body: EgressAssignment, session: AsyncSession = Depends(get_session)):
+    async with app.state.change_lock:
+        draft, row = await _draft(session)
+        _check_revision(body.revision, draft)
+        if not any(item.id == egress_id for item in draft.saved_awg_egresses):
+            raise HTTPException(404, "Saved AWG egress not found")
+        if body.provider_id is not None and not any(item.id == body.provider_id for item in draft.providers):
+            raise HTTPException(404, "Provider not found")
+        exits = tuple(item.model_copy(update={"provider_id": body.provider_id}) if item.id == egress_id else item for item in draft.saved_awg_egresses)
+        await _save(session, draft, row, saved_awg_egresses=exits)
 
 
 @app.post("/api/core/egresses", status_code=201, dependencies=_authenticated)

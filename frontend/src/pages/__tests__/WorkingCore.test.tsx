@@ -14,6 +14,80 @@ vi.mock('@/api/client', () => ({
 }))
 
 describe('Working Core panel', () => {
+  it('shows folders before root exits and keeps folder navigation through refresh', async () => {
+    const state = {
+      revision: 4, vless: null, clients: [], rules: [], resolvers: [], agent: { active_egress_id: 'a1' },
+      providers: [{ id: 'p1', name: 'Amsterdam' }, { id: 'p2', name: 'Berlin' }],
+      saved_awg_egresses: [{ id: 'a1', name: 'AWG NL', provider_id: 'p1' }],
+      saved_egresses: [{ id: 'v1', name: 'Root VLESS', provider_id: null }], selected_egress_id: 'a1',
+    }
+    vi.mocked(http.get).mockResolvedValue({ data: state })
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Выходы' }))
+    const catalog = within(await screen.findByRole('region', { name: 'Каталог выходов' }))
+    const rows = catalog.getAllByRole('row')
+    expect(within(rows[1]).getByRole('button', { name: 'Amsterdam' })).toBeInTheDocument()
+    expect(catalog.getByText('Root VLESS')).toBeInTheDocument()
+    expect(catalog.queryByText('AWG NL')).toBeNull()
+    fireEvent.click(catalog.getByRole('button', { name: 'Amsterdam' }))
+    expect(catalog.getByText('AWG NL')).toBeInTheDocument()
+    expect(catalog.queryByText('Root VLESS')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Назад к выходам' }))
+    expect(catalog.getByText('Root VLESS')).toBeInTheDocument()
+  })
+
+  it('creates a folder from the catalog without applying traffic', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 3, vless: null, clients: [], rules: [], resolvers: [], agent: null,
+      providers: [], saved_egresses: [], saved_awg_egresses: [], selected_egress_id: null,
+    } })
+    vi.mocked(http.post).mockReset().mockResolvedValue({ data: { id: 'p1' } })
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Выходы' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Добавить' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Создать папку' }))
+    fireEvent.change(screen.getByLabelText('Название папки'), { target: { value: 'Premium' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' }))
+    await waitFor(() => expect(http.post).toHaveBeenCalledWith('/core/providers', { revision: 3, name: 'Premium' }))
+  })
+
+  it('imports a subscription into the open folder without asking for it again', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 5, vless: null, clients: [], rules: [], resolvers: [], agent: null,
+      providers: [{ id: 'p1', name: 'Premium' }], saved_egresses: [], saved_awg_egresses: [], selected_egress_id: null,
+    } })
+    vi.mocked(http.post).mockReset().mockResolvedValue({ data: { revision: 5, preview_id: null, results: [] } })
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Выходы' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Premium$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Импортировать подписку' }))
+    expect(screen.queryByRole('combobox', { name: 'Папка для импорта' })).toBeNull()
+    fireEvent.change(screen.getByLabelText('Содержимое подписки'), { target: { value: 'fixture' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр подписки' }))
+    await waitFor(() => expect(http.post).toHaveBeenCalledWith('/core/providers/p1/subscription/preview', {
+      revision: 5, content: 'fixture', dial_ips: {},
+    }))
+  })
+
+  it('moves an AWG exit back to the root without applying', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: {
+      revision: 6, vless: null, clients: [], rules: [], resolvers: [], agent: null,
+      providers: [{ id: 'p1', name: 'Premium' }], saved_egresses: [],
+      saved_awg_egresses: [{ id: 'a1', name: 'AWG NL', provider_id: 'p1' }], selected_egress_id: 'a1',
+    } })
+    vi.mocked(http.put).mockReset().mockResolvedValue({ data: null })
+    vi.mocked(http.post).mockReset()
+    render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Выходы' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Premium$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Действия выхода AWG NL' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Перенести в…' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Новое расположение' }), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Перенести' }))
+    await waitFor(() => expect(http.put).toHaveBeenCalledWith('/core/awg-egresses/a1/provider', { revision: 6, provider_id: null }))
+    expect(http.post).not.toHaveBeenCalled()
+  })
   it('filters the combined catalog and previews changes from another section', async () => {
     vi.mocked(http.get).mockResolvedValue({ data: {
       revision: 4, vless: null, clients: [], rules: [], resolvers: [],
@@ -25,7 +99,7 @@ describe('Working Core panel', () => {
     } })
     vi.mocked(http.post).mockReset().mockResolvedValue({ data: { revision: 4, base_generation: 7, sections: ['vless'] } })
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
-    await screen.findByRole('button', { name: 'Добавить выход' })
+    await screen.findByRole('button', { name: 'Добавить' })
     fireEvent.click(screen.getByRole('button', { name: 'Выходы' }))
     const catalog = within(screen.getByRole('region', { name: 'Каталог выходов' }))
     expect(catalog.getByText('VLESS exit')).toBeInTheDocument()
@@ -66,9 +140,9 @@ describe('Working Core panel', () => {
       } })
       .mockResolvedValueOnce({ data: { added: 1 } })
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
-    fireEvent.click(await screen.findByRole('button', { name: 'Добавить выход' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Импорт подписки' }))
-    choose('Провайдер для импорта', 'VPS')
+    fireEvent.click(await screen.findByRole('button', { name: 'Добавить' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Импортировать подписку' }))
+    choose('Папка для импорта', 'VPS')
     const source = screen.getByLabelText('Содержимое подписки')
     fireEvent.change(source, { target: { value: 'fixture-subscription-content' } })
     fireEvent.click(screen.getByRole('button', { name: 'Предпросмотр подписки' }))
@@ -95,7 +169,9 @@ describe('Working Core panel', () => {
     } })
     vi.mocked(http.post).mockReset().mockResolvedValue({ data: { id: 'new-exit' } })
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
-    fireEvent.click(await screen.findByRole('button', { name: 'Добавить выход' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Выходы' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'VPS' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Добавить VLESS' }))
     const mode = await screen.findByRole('combobox', { name: 'Способ добавления выхода' })
     const form = within(mode.closest('form')!)
@@ -112,7 +188,6 @@ describe('Working Core panel', () => {
     for (const [label, value] of Object.entries(values)) {
       fireEvent.change(form.getByLabelText(label, { exact: true }), { target: { value } })
     }
-    choose('Провайдер', 'VPS')
     choose('Fingerprint', 'firefox')
     choose('Flow', 'xtls-rprx-vision')
     fireEvent.click(form.getByRole('button', { name: 'Сохранить выход' }))
@@ -134,8 +209,11 @@ describe('Working Core panel', () => {
     vi.mocked(http.put).mockReset().mockResolvedValue({ data: null })
     vi.mocked(http.post).mockReset()
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
-    await screen.findByRole('combobox', { name: 'Провайдер выхода «Amsterdam»' })
-    choose('Провайдер выхода «Amsterdam»', 'VPS')
+    fireEvent.click(screen.getByRole('button', { name: 'Выходы' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Действия выхода Amsterdam' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Перенести в…' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Новое расположение' }), { target: { value: 'provider-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Перенести' }))
     await waitFor(() => expect(http.put).toHaveBeenCalledWith('/core/egresses/exit-1/provider', { revision: 4, provider_id: 'provider-1' }))
     expect(http.post).not.toHaveBeenCalled()
   })
@@ -147,6 +225,7 @@ describe('Working Core panel', () => {
     } })
     vi.mocked(http.post).mockReset().mockResolvedValue({ data: null })
     render(<QueryClientProvider client={new QueryClient()}><WorkingCore /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Выходы' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Действия выхода VPS NL' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Выбрать' }))
     await waitFor(() => expect(http.post).toHaveBeenCalledWith('/core/egresses/nl-id/select', { revision: 9 }))

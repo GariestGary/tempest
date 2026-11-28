@@ -1,5 +1,13 @@
 # TEMPEST — статус форка
 
+## 2026-11-28 · Working Core — каталог выходов
+
+Раздел «Провайдеры» объединён с «Выходами»: существующие Provider показаны плоскими папками, сохранённые AWG/VLESS отображаются в папке или корне по `provider_id`. Добавлены breadcrumbs, возврат, поиск, фильтр протокола, сортировка, пустые состояния, количество и состояние выходов в папке, создание папки и контекстные действия. Создание AWG/VLESS и импорт подписки внутри папки используют её автоматически; в корне импорт предлагает существующую или новую папку. Legacy прямой VLESS не получил операции переноса.
+
+API: `PUT /api/core/awg-egresses/{id}/provider` переносит AWG с проверкой `revision` и существования Provider; `DELETE /api/core/providers/{id}` принимает необязательное `move_egresses_to_root` и при явном запросе атомарно отвязывает сохранённые AWG/VLESS перед удалением папки. Старый DELETE без флага по-прежнему отвечает 409 для непустой папки. Схема хранения, ID, секреты и формат сетевого плана не менялись. План до/после перемещения выбранного AWG совпал за исключением случайного ID кандидата; Apply/Agent для операций каталога не вызывались.
+
+Проверка: backend Working Core 10 passed (17 существующих предупреждений); frontend 159 passed, ESLint и TypeScript/Vite production build прошли. Mock на desktop и 390 px проверен в корне и внутри папки; обнаруженный скрытый CSS-селектор исправлен до повторной проверки. Локальный backend pytest в sandbox зависает на fixture, поэтому целевой прогон выполнен вне sandbox. Большой JS chunk остаётся существующим предупреждением сборки. Реальный трафик, VORTEX и production не затрагивались. Hosted CI/CodeQL — после публикации.
+
 ## 2026-11-28 · VORTEX — control plane обновлён
 
 По явному разрешению владельца API и Web UI собраны из проверенного master `a4aee1156a590ac23f3c63c72ba117b91d01296d`, version `1.7.8`; текущие image IDs: API `sha256:6e881ba89b49b28665e72836dd7a6b1e9c9738e3adedfd3ddf33d4c081c504eb`, UI `sha256:6012e3fb0ca834544765970e8bead42eef2602106ce78d1ac0fe816bd6399544`. Создан постоянный root-owned bundle `/opt/tempest-deploy-a4aee1156a590ac23f3c63c72ba117b91d01296d`, заменён вручную созданный panel unit и выполнен `daemon-reload`. Compose project прежний; SQLite volume, private provisioning bind и Agent socket bind сохранены. Старые image IDs получили отдельные rollback tags.
